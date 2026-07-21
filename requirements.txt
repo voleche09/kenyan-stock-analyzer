@@ -2,6 +2,7 @@
 # Install: pip install -r requirements.txt
 
 # Core
+tvkit>=0.11.2
 yfinance>=1.5.1
 pandas>=3.0.0
 numpy>=2.5.0

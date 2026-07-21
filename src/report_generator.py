@@ -381,6 +381,17 @@ class ReportGenerator:
         else:
             recommendation_text = 'Strong Sell'
 
+        # Buy/Hold/Sell class for colour-coding the executive summary
+        rt = recommendation_text.lower()
+        if 'sell' in rt:
+            rec_class = 'sell'
+        elif 'buy' in rt:
+            rec_class = 'buy'
+        elif 'hold' in rt or 'neutral' in rt:
+            rec_class = 'hold'
+        else:
+            rec_class = 'none'
+
         # Render template
         template_data = {
             'symbol': symbol,
@@ -398,6 +409,7 @@ class ReportGenerator:
             'similar_stocks': similar_stocks,
             'sector_peers': sector_peers,
             'recommendation_text': recommendation_text,
+            'rec_class': rec_class,
             # Accuracy & enrichment
             'validation': validation or {},
             'score': score or {},
@@ -733,6 +745,181 @@ class ReportGenerator:
     # ============================================================
 
     # ============================================================
+    #  Summary report (compact 1-page PDF for daily email)
+    # ============================================================
+
+    def generate_summary(self, analysis_results, fundamentals_data=None,
+                         validations=None, scores=None, alerts=None,
+                         breadth=None, sector_data=None, usd_kes=None,
+                         watchlist=None, report_type='pdf'):
+        """
+        Build a compact, one-page summary of key metrics and render it to PDF
+        (and/or HTML). Designed for a daily email — a subset of the dashboard.
+
+        Returns the path(s) from _save_report (str or tuple).
+        """
+        fundamentals_data = fundamentals_data or {}
+        validations = validations or {}
+        scores = scores or {}
+        alerts = alerts or {}
+        now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
+
+        total = len([r for r in analysis_results.values() if r])
+        bullish = sum(1 for r in analysis_results.values()
+                      if r and r.get('signals', {}).get('overall') == 'bullish')
+        bearish = sum(1 for r in analysis_results.values()
+                      if r and r.get('signals', {}).get('overall') == 'bearish')
+
+        # Data quality
+        v_ok = sum(1 for v in validations.values() if v.get('status') == 'ok')
+        v_mis = sum(1 for v in validations.values() if v.get('status') == 'mismatch')
+        v_stale = sum(1 for v in validations.values() if v.get('status') == 'stale')
+
+        fx_str = f"USD/KES {usd_kes['rate']:.2f}" if usd_kes and usd_kes.get('rate') else ''
+
+        # ---- Watchlist rows ----
+        watchlist = watchlist or sorted(analysis_results.keys())
+        wl_rows = ''
+        for sym in watchlist:
+            r = analysis_results.get(sym)
+            if not r:
+                continue
+            latest = r.get('latest', {})
+            fund = fundamentals_data.get(sym, {})
+            label, cls = FundamentalAnalysis.signal_from_tech_rating(fund.get('tech_rating'))
+            chg = r.get('daily_change_pct')
+            chg_str = f"{chg:+.2f}%" if chg is not None else '—'
+            chg_col = '#16a34a' if (chg or 0) >= 0 else '#dc2626'
+            price = latest.get('close')
+            price_str = f"{price:.2f}" if price else '—'
+            dy = fund.get('dividend_yield')
+            dy_str = f"{dy:.1f}%" if dy else '—'
+            score = scores.get(sym, {}).get('overall')
+            score_str = str(score) if score is not None else '—'
+            sig_col = {'strong_buy': '#16a34a', 'buy': '#16a34a', 'neutral': '#d97706',
+                       'sell': '#dc2626', 'strong_sell': '#dc2626'}.get(cls, '#94a3b8')
+            wl_rows += (
+                f'<tr><td><b>{sym}</b></td>'
+                f'<td style="color:{sig_col};font-weight:700;">{label}</td>'
+                f'<td>{price_str}</td>'
+                f'<td style="color:{chg_col};">{chg_str}</td>'
+                f'<td>{dy_str}</td>'
+                f'<td>{score_str}</td></tr>'
+            )
+
+        # ---- Top movers ----
+        changes = [(s, r['daily_change_pct']) for s, r in analysis_results.items()
+                   if r and r.get('daily_change_pct') is not None]
+        changes.sort(key=lambda x: x[1], reverse=True)
+        gainers = changes[:5]
+        losers = changes[-5:][::-1] if len(changes) >= 5 else []
+        movers_rows = ''
+        for label, rows in [('Gainers', gainers), ('Losers', losers)]:
+            for sym, chg in rows:
+                col = '#16a34a' if chg >= 0 else '#dc2626'
+                movers_rows += (f'<tr><td>{label}</td><td><b>{sym}</b></td>'
+                                f'<td style="color:{col};">{chg:+.2f}%</td></tr>')
+
+        # ---- Upcoming ex-dividends (next 30 days) ----
+        today = datetime.now().date()
+        upcoming = []
+        for sym, f in fundamentals_data.items():
+            ex = f.get('dividend_ex_date')
+            if not ex:
+                continue
+            try:
+                d = datetime.strptime(ex, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                continue
+            delta = (d - today).days
+            if 0 <= delta <= 30:
+                upcoming.append((delta, sym, ex, f.get('dps_fy'), f.get('dividend_yield')))
+        upcoming.sort()
+        exdiv_rows = ''
+        for delta, sym, ex, dps, dy in upcoming:
+            dps_str = f"{dps:g}" if dps else '0'
+            dy_str = f"{dy:.1f}%" if dy else '—'
+            when = 'today' if delta == 0 else f'in {delta}d'
+            exdiv_rows += (
+                f'<tr><td><b>{sym}</b></td>'
+                f'<td>{dps_str}</td>'
+                f'<td>{dy_str}</td>'
+                f'<td style="color:#166534;font-weight:700;">{ex} ({when})</td></tr>'
+            )
+        if not exdiv_rows:
+            exdiv_rows = '<tr><td colspan="4" style="color:#94a3b8;">None in the next 30 days</td></tr>'
+
+        # ---- Key alerts (cap to keep it one page) ----
+        alert_items = ''
+        shown = 0
+        for sym in sorted(alerts.keys()):
+            for a in alerts[sym]:
+                if any(k in a for k in ['Strong Buy', 'Strong Sell', 'Oversold',
+                                        'High dividend', 'Ex-dividend', '52-week']):
+                    alert_items += f'<li><b>{sym}</b>: {a}</li>'
+                    shown += 1
+            if shown >= 14:
+                break
+
+        html = self._build_summary_html(
+            now=now, fx_str=fx_str, total=total, bullish=bullish, bearish=bearish,
+            v_ok=v_ok, v_mis=v_mis, v_stale=v_stale, breadth=breadth,
+            wl_rows=wl_rows, movers_rows=movers_rows, exdiv_rows=exdiv_rows,
+            alert_items=alert_items,
+        )
+        return self._save_report('nse_summary', html, report_type)
+
+    @staticmethod
+    def _build_summary_html(now, fx_str, total, bullish, bearish, v_ok, v_mis,
+                            v_stale, breadth, wl_rows, movers_rows, exdiv_rows,
+                            alert_items):
+        breadth = breadth or {}
+        breadth_str = ' · '.join(
+            f"{lbl} {breadth[k]}%" for k, lbl in
+            [('pct_above_sma50', 'Above SMA50'), ('pct_bullish_macd', 'Bullish MACD'),
+             ('pct_rsi_above_50', 'RSI>50')] if k in breadth
+        )
+        alerts_block = (f'<h2>🔔 Key Alerts</h2><ul>{alert_items}</ul>'
+                        if alert_items else '')
+        return f'''<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+@page {{ size: A4; margin: 14mm; }}
+body {{ font-family: -apple-system, Segoe UI, Roboto, sans-serif; color: #1e293b; font-size: 11px; }}
+h1 {{ font-size: 18px; margin: 0; }}
+h2 {{ font-size: 12px; border-bottom: 2px solid #3b82f6; padding-bottom: 3px; margin: 14px 0 6px; }}
+.sub {{ color: #64748b; font-size: 10px; margin-bottom: 10px; }}
+.pills {{ margin: 8px 0; }}
+.pill {{ display: inline-block; background: #f1f5f9; border-radius: 8px; padding: 6px 12px; margin-right: 6px; }}
+.pill b {{ font-size: 15px; }}
+.g {{ color: #16a34a; }} .r {{ color: #dc2626; }} .a {{ color: #d97706; }}
+table {{ width: 100%; border-collapse: collapse; font-size: 10px; }}
+th, td {{ padding: 4px 6px; text-align: left; border-bottom: 1px solid #e2e8f0; }}
+th {{ background: #f8fafc; color: #64748b; text-transform: uppercase; font-size: 8.5px; }}
+ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
+.note {{ color: #94a3b8; font-size: 9px; margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 6px; }}
+</style></head><body>
+<h1>🇰🇪 NSE Daily Summary</h1>
+<div class="sub">{now}{(' · ' + fx_str) if fx_str else ''}</div>
+<div class="pills">
+  <span class="pill"><b>{total}</b> stocks</span>
+  <span class="pill g"><b>{bullish}</b> bullish</span>
+  <span class="pill r"><b>{bearish}</b> bearish</span>
+  <span class="pill g"><b>{v_ok}</b> price-verified</span>
+  <span class="pill r"><b>{v_mis}</b> mismatch</span>
+  <span class="pill a"><b>{v_stale}</b> stale</span>
+</div>
+{f'<div class="sub">Breadth: {breadth_str}</div>' if breadth_str else ''}
+<h2>⭐ Watchlist</h2>
+<table><thead><tr><th>Symbol</th><th>TV Signal</th><th>Price</th><th>Change</th><th>Yield</th><th>Score</th></tr></thead>
+<tbody>{wl_rows}</tbody></table>
+<h2>📈 Top Movers</h2>
+<table><thead><tr><th>Dir</th><th>Symbol</th><th>Change</th></tr></thead><tbody>{movers_rows}</tbody></table>
+<h2>💵 Upcoming Ex-Dividends (next 30 days)</h2>
+<table><thead><tr><th>Symbol</th><th>Div KES</th><th>Yield</th><th>Ex-Date</th></tr></thead><tbody>{exdiv_rows}</tbody></table>
+{alerts_block}
+<div class="note">Data: TradingView (~15 min delayed), cross-checked against afx.kwayisi.org. Prices verified where possible; treat mismatches with caution. This is a mechanical summary, not investment advice.</div>
+</body></html>'''
+
+    # ============================================================
     #  Index Dashboard (single entry point)
     # ============================================================
 
@@ -934,6 +1121,7 @@ class ReportGenerator:
             stock_rows += f'''
             <tr>
                 <td><a href="{link}" class="stock-link"><strong>{s['symbol']}</strong></a></td>
+                <td><span class="badge {s['signal_class']}">{s['signal_label']}</span></td>
                 <td>{price_str} {mark_html}</td>
                 <td class="{chg_class}">{chg_str}</td>
                 <td>{dy_str}</td>
@@ -948,7 +1136,6 @@ class ReportGenerator:
                 <td><span class="badge {s['stochastic']}">{s['stochastic']}</span></td>
                 <td><span class="badge {s['volume_signal']}">{s['volume_signal'].replace('_',' ')}</span></td>
                 <td><span class="badge {s['overall']}">{s['overall']}</span></td>
-                <td><span class="badge {s['signal_class']}">{s['signal_label']}</span></td>
                 <td>{score_html}</td>
             </tr>'''
 
@@ -1274,13 +1461,15 @@ tr:hover {{ background: #f8fafc; }}
         <table id="stockTable">
             <thead>
                 <tr>
-                    <th>Symbol</th><th>Price</th><th>Change</th>
+                    <th>Symbol</th>
+                    <th title="TradingView technical rating — Buy / Sell / Neutral">TV Signal</th>
+                    <th>Price</th><th>Change</th>
                     <th title="Dividend yield">Yield</th>
                     <th title="Dividend per share (KES). 0 = no dividend">Div KES</th>
                     <th title="Ex-dividend date. Green = upcoming (buy before it to receive the dividend)">Ex-Div Date</th>
                     <th>P/E</th><th>Market Cap</th>
                     <th>RSI</th><th>Trend</th><th>MA</th><th>MACD</th><th>Stoch</th><th>Vol</th>
-                    <th>Overall</th><th title="TradingView technical rating">TV Signal</th>
+                    <th>Overall</th>
                     <th title="Transparent 0-100 factor screen (value, quality, momentum, dividend, liquidity)">Score</th>
                 </tr>
             </thead>
