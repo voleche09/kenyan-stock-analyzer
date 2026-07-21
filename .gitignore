@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environment
+venv/
+.venv/
+env/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Project data (generated daily)
+reports/
+data/
+logs/
+
+# Claude Code settings (may contain local paths/secrets)
+.claude/
+
+# Environment variables (contains secrets)
+.env
+.env.local
+*.env
+
+# Keep example files
+!.env.example
+
+# Jupyter notebooks
+.ipynb_checkpoints/
+
+# PDF/Excel output
+*.pdf
+*.xlsx

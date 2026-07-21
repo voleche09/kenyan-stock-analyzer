@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}NSE Market Summary Report{% endblock %}
+
+{% block extra_css %}
+<style>
+    .sector-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+    }
+    .sector-card {
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 16px;
+        background: var(--bg);
+    }
+    .sector-card h3 {
+        margin-bottom: 8px;
+        font-size: 1rem;
+    }
+    .sector-card .change {
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+    .sector-card .change.positive { color: var(--bullish); }
+    .sector-card .change.negative { color: var(--bearish); }
+    .sector-card .stocks {
+        color: var(--text-muted);
+        font-size: 0.8rem;
+        margin-top: 4px;
+    }
+    .breadth-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 12px;
+    }
+    .breadth-item {
+        text-align: center;
+        padding: 16px;
+        background: var(--bg);
+        border-radius: 8px;
+    }
+    .breadth-item .big {
+        font-size: 2rem;
+        font-weight: 700;
+        color: var(--accent);
+    }
+    .breadth-item .label {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        margin-top: 4px;
+    }
+    .gainers-losers {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 20px;
+    }
+    @media (max-width: 600px) {
+        .gainers-losers { grid-template-columns: 1fr; }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="header">
+    <h1>NSE Market Summary</h1>
+    <div class="meta">Generated at {{ generated_at }}</div>
+</div>
+
+<!-- Market Breadth -->
+{% if breadth %}
+<div class="card">
+    <h2>Market Breadth</h2>
+    <div class="breadth-grid">
+        {% if breadth.total_stocks is defined %}
+        <div class="breadth-item">
+            <div class="big">{{ breadth.total_stocks }}</div>
+            <div class="label">Stocks Analyzed</div>
+        </div>
+        {% endif %}
+        {% if breadth.pct_above_sma50 is defined %}
+        <div class="breadth-item">
+            <div class="big">{{ breadth.pct_above_sma50 }}%</div>
+            <div class="label">Above SMA 50</div>
+        </div>
+        {% endif %}
+        {% if breadth.pct_bullish_macd is defined %}
+        <div class="breadth-item">
+            <div class="big">{{ breadth.pct_bullish_macd }}%</div>
+            <div class="label">Bullish MACD</div>
+        </div>
+        {% endif %}
+        {% if breadth.pct_rsi_above_50 is defined %}
+        <div class="breadth-item">
+            <div class="big">{{ breadth.pct_rsi_above_50 }}%</div>
+            <div class="label">RSI Above 50</div>
+        </div>
+        {% endif %}
+        {% if breadth.advance_decline_ratio is defined %}
+        <div class="breadth-item">
+            <div class="big">{{ breadth.advance_decline_ratio }}</div>
+            <div class="label">Advance/Decline Ratio</div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Sector Performance -->
+{% if sectors %}
+<div class="card">
+    <h2>Sector Performance</h2>
+    <div class="sector-grid">
+        {% for name, data in sectors.items() %}
+        <div class="sector-card">
+            <h3>{{ name }}</h3>
+            <div class="change {% if data.avg_change_pct >= 0 %}positive{% else %}negative{% endif %}">
+                {{ "%+.2f"|format(data.avg_change_pct) }}%
+            </div>
+            <div class="stocks">
+                {{ data.count }} stocks: {{ data.symbols|join(', ') }}
+            </div>
+            <div style="margin-top: 8px; font-size: 0.85rem;">
+                RSI: {{ data.avg_rsi|default('N/A') }} |
+                Bullish: {{ data.bullish_ratio }}%
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Top Gainers & Losers -->
+{% if gainers or losers %}
+<div class="gainers-losers">
+    {% if gainers %}
+    <div class="card">
+        <h2>Top Gainers</h2>
+        <table>
+            <thead><tr><th>Symbol</th><th>Price</th><th>Change</th></tr></thead>
+            <tbody>
+                {% for g in gainers[:5] %}
+                <tr>
+                    <td><strong>{{ g.symbol }}</strong></td>
+                    <td>{{ "%.2f"|format(g.price) if g.price else 'N/A' }}</td>
+                    <td style="color: var(--bullish);">{{ "%+.2f"|format(g.change) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+    {% if losers %}
+    <div class="card">
+        <h2>Top Losers</h2>
+        <table>
+            <thead><tr><th>Symbol</th><th>Price</th><th>Change</th></tr></thead>
+            <tbody>
+                {% for l in losers[:5] %}
+                <tr>
+                    <td><strong>{{ l.symbol }}</strong></td>
+                    <td>{{ "%.2f"|format(l.price) if l.price else 'N/A' }}</td>
+                    <td style="color: var(--bearish);">{{ "%+.2f"|format(l.change) }}%</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+<!-- Stock Signals Table -->
+<div class="card">
+    <h2>All Stocks — Signals Summary</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Symbol</th>
+                <th>Price</th>
+                <th>Change</th>
+                <th>RSI</th>
+                <th>MA Signal</th>
+                <th>MACD</th>
+                <th>Trend</th>
+                <th>Overall</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for stock in stocks %}
+            <tr>
+                <td><strong>{{ stock.symbol }}</strong></td>
+                <td>{{ "%.2f"|format(stock.price) if stock.price else 'N/A' }}</td>
+                <td style="color: {% if stock.change and stock.change >= 0 %}var(--bullish){% else %}var(--bearish){% endif %};">
+                    {{ "%+.2f"|format(stock.change) ~ '%' if stock.change else 'N/A' }}
+                </td>
+                <td>{{ "%.1f"|format(stock.rsi) if stock.rsi else 'N/A' }}</td>
+                <td><span class="signal {{ stock.signal_ma }}">{{ stock.signal_ma|replace('_', ' ')|title }}</span></td>
+                <td><span class="signal {{ stock.signal_macd }}">{{ stock.signal_macd|replace('_', ' ')|title }}</span></td>
+                <td><span class="signal {{ stock.trend }}">{{ stock.trend|title }}</span></td>
+                <td><span class="signal {{ stock.overall }}">{{ stock.overall|title }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

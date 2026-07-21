@@ -1,0 +1,23 @@
+# Crontab example for the Kenyan Stock Analyzer
+#
+# Run the analysis at market close (15:00 EAT = 12:00 UTC) on weekdays.
+#
+# Add to your crontab with: crontab -e
+#
+# Replace /path/to/ with the actual path to this project.
+
+# ---- Option 1: Run directly (simplest) ----
+# 0 12 * * 1-5 cd /path/to/kenyan_stock_analyzer && ./venv/bin/python main.py --report-type both --export-excel --detailed >> logs/cron.log 2>&1
+
+# ---- Option 2: Run via scheduler (handles market hours check) ----
+# 0 12 * * 1-5 cd /path/to/kenyan_stock_analyzer && ./venv/bin/python scheduler.py --run-once --report-type both --export-excel --detailed >> logs/cron.log 2>&1
+
+# ---- Option 3: Quick daily run (just dashboard, no individual reports) ----
+# 0 12 * * 1-5 cd /path/to/kenyan_stock_analyzer && ./venv/bin/python main.py --report-type html --export-excel >> logs/cron.log 2>&1
+
+# ---- Notes ----
+# - EAT is UTC+3, so 15:00 EAT = 12:00 UTC
+# - Kenya does not observe daylight saving time
+# - Use `./venv/bin/python` to use the virtual environment
+# - Logs are appended to logs/cron.log
+# - For Gmail SMTP, use an App Password: https://myaccount.google.com/apppasswords

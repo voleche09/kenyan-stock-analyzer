@@ -1,0 +1,684 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} — Executive Summary & Analysis{% endblock %}
+
+{% block content %}
+<!-- Navigation Bar -->
+<div class="nav-bar">
+    <a href="index.html" class="nav-link">← Back to NSE Dashboard</a>
+    <span class="nav-date">📅 Data as of: {{ data_date }}</span>
+    {% if fundamentals._data_source %}
+    <span class="nav-source">Source: {{ fundamentals._data_source }}</span>
+    {% endif %}
+</div>
+
+<!-- Header -->
+<div class="header">
+    <h1>{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}</h1>
+    <div class="meta">
+        Generated at {{ generated_at }} |
+        Market Cap: {{ fmt_mcap(fundamentals.market_cap) }} |
+        Price: {{ "%.2f"|format(latest.close) if latest.close else 'N/A' }} KES
+        {% if daily_change is not none %}
+        | Daily Change: <span class="{% if daily_change >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.2f"|format(daily_change) }}%
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- EXECUTIVE SUMMARY -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>📊 Executive Summary</h2>
+
+    <!-- Overall Signal -->
+    {% set overall = signals.get('overall', 'neutral') %}
+    <div class="executive-verdict verdict-{{ overall }}">
+        <div class="verdict-label">Overall Technical Signal</div>
+        <div class="verdict-value">{{ overall|upper }}</div>
+        <div class="verdict-desc">
+            {% if overall == 'bullish' %}
+            Most technical indicators point upward — the stock is in a positive trend.
+            {% elif overall == 'bearish' %}
+            Most technical indicators point downward — the stock is in a negative trend.
+            {% else %}
+            Technical indicators are mixed — no clear direction at this time.
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Key Metrics Row -->
+    <div class="key-metrics-row">
+        <div class="key-metric">
+            <div class="km-value">{{ "%.2f"|format(latest.close) if latest.close else 'N/A' }}</div>
+            <div class="km-label">Price (KES)</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value">{{ fmt_mcap(fundamentals.market_cap) }}</div>
+            <div class="km-label">Market Cap</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value {{ 'positive' if fundamentals.pe_ratio and fundamentals.pe_ratio < 15 else '' }}">
+                {{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}
+            </div>
+            <div class="km-label">P/E Ratio</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value {{ 'positive' if fundamentals.peg_ratio and fundamentals.peg_ratio < 1 else 'negative' }}">
+                {{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}
+            </div>
+            <div class="km-label">PEG Ratio</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value">{{ "%.1f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
+            <div class="km-label">ROE</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value">{{ "%.1f"|format(latest.rsi) if latest.rsi else 'N/A' }}</div>
+            <div class="km-label">RSI (14)</div>
+        </div>
+    </div>
+
+    <!-- Plain English Explanations -->
+    <div class="explanations-section">
+        <h3>📖 What These Terms Mean (Plain English)</h3>
+        <div class="explanation-grid">
+            <div class="explanation-card">
+                <strong>P/E Ratio (Price-to-Earnings)</strong>
+                <p>How many shillings you pay for every 1 shilling of profit.
+                <em>Low P/E (<15) = potentially cheap. High P/E (>25) = investors expect fast growth.</em>
+                {% if fundamentals.pe_ratio %}
+                <br><span class="interpretation">{{ interpret_pe(fundamentals.pe_ratio) }}</span>
+                {% endif %}</p>
+            </div>
+            <div class="explanation-card">
+                <strong>PEG Ratio (Price/Earnings to Growth)</strong>
+                <p>P/E divided by earnings growth rate. PEG &lt; 1.0 may mean the stock is undervalued relative to its growth.
+                {% if fundamentals.peg_ratio %}
+                <br><span class="interpretation">{{ interpret_peg(fundamentals.peg_ratio) }}</span>
+                {% endif %}</p>
+            </div>
+            <div class="explanation-card">
+                <strong>ROE (Return on Equity)</strong>
+                <p>How much profit the company makes with shareholder money. <em>15%+ = good, 20%+ = excellent.</em>
+                {% if fundamentals.roe %}
+                <br><span class="interpretation">{{ interpret_roe(fundamentals.roe) }}</span>
+                {% endif %}</p>
+            </div>
+            <div class="explanation-card">
+                <strong>ROIC (Return on Invested Capital)</strong>
+                <p>How well the company uses ALL invested money (from shareholders AND lenders) to generate profit. <em>ROIC > 15% is strong.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>RSI (Relative Strength Index)</strong>
+                <p>Momentum indicator from 0-100. <em>Above 70 = overbought (price ran up fast, may pull back). Below 30 = oversold (price fell too far, may bounce). 30-70 = neutral.</em>
+                {% if latest.rsi %}
+                <br><span class="interpretation">{{ interpret_rsi(latest.rsi) }}</span>
+                {% endif %}</p>
+            </div>
+            <div class="explanation-card">
+                <strong>MACD (Moving Average Convergence Divergence)</strong>
+                <p>Tracks the relationship between two moving averages. <em>MACD above signal line = bullish. MACD below signal line = bearish. A "cross" signals a potential trend change.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>Bollinger Bands</strong>
+                <p>Price 'envelope' around a moving average. <em>Price near upper band = relatively expensive. Price near lower band = relatively cheap. Bands widen when volatility increases.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>Debt-to-Equity</strong>
+                <p>How much debt vs. shareholder equity. <em>Below 0.5 = conservative (low risk). Above 2.0 = aggressive (high risk).</em>
+                {% if fundamentals.debt_to_equity %}
+                <br><span class="interpretation">{{ interpret_de(fundamentals.debt_to_equity) }}</span>
+                {% endif %}</p>
+            </div>
+            <div class="explanation-card">
+                <strong>Operating Margin</strong>
+                <p>Percentage of revenue left after paying for operations. <em>Higher = more efficient business. 20%+ is generally strong.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>Net Margin</strong>
+                <p>Percentage of revenue that becomes actual profit after ALL costs. <em>The 'bottom line' — higher is better.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>EPS Growth</strong>
+                <p>How fast earnings per share are growing year-over-year. <em>10%+ is solid. 20%+ is excellent. Negative = profits shrinking.</em></p>
+            </div>
+            <div class="explanation-card">
+                <strong>Revenue Growth</strong>
+                <p>How fast total sales are growing year-over-year. <em>Growing revenue = expanding business. Falling = may be losing market share.</em></p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- FUNDAMENTAL METRICS -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>💰 Fundamental Analysis <span class="data-date">Data from TradingView as of {{ data_date }}</span></h2>
+
+    <!-- Valuation -->
+    <h3 class="section-subtitle">Valuation</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">Market Cap</div>
+            <div class="value">{{ fmt_mcap(fundamentals.market_cap) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">P/E Ratio (TTM)</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">PEG Ratio</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Price/Book</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.price_to_book) if fundamentals.price_to_book else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Price/Sales</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.price_to_sales) if fundamentals.price_to_sales else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Enterprise Value</div>
+            <div class="value">{{ fmt_currency(fundamentals.enterprise_value) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">EV/Revenue</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.ev_to_revenue) if fundamentals.ev_to_revenue else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">EV/EBITDA</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.ev_to_ebitda) if fundamentals.ev_to_ebitda else 'N/A' }}</div>
+        </div>
+    </div>
+
+    <!-- Growth -->
+    <h3 class="section-subtitle">Growth</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">Revenue Growth (YoY)</div>
+            <div class="value {{ 'positive' if fundamentals.revenue_growth_yoy and fundamentals.revenue_growth_yoy > 0 else 'negative' }}">
+                {{ "%.2f"|format(fundamentals.revenue_growth_yoy) ~ '%' if fundamentals.revenue_growth_yoy else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">EPS Growth (YoY)</div>
+            <div class="value {{ 'positive' if fundamentals.eps_growth_yoy and fundamentals.eps_growth_yoy > 0 else 'negative' }}">
+                {{ "%.2f"|format(fundamentals.eps_growth_yoy) ~ '%' if fundamentals.eps_growth_yoy else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">EPS (TTM)</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Revenue (TTM)</div>
+            <div class="value">{{ fmt_currency(fundamentals.revenue_ttm) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Net Income (TTM)</div>
+            <div class="value">{{ fmt_currency(fundamentals.net_income_ttm) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Free Cash Flow (TTM)</div>
+            <div class="value">{{ fmt_currency(fundamentals.free_cash_flow_ttm) }}</div>
+        </div>
+    </div>
+
+    <!-- Profitability -->
+    <h3 class="section-subtitle">Profitability</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">ROE</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">ROIC</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.roic) ~ '%' if fundamentals.roic else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">ROA</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.roa) ~ '%' if fundamentals.roa else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Gross Margin</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.gross_margin) ~ '%' if fundamentals.gross_margin else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Operating Margin</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.operating_margin) ~ '%' if fundamentals.operating_margin else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Net Margin</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.net_margin) ~ '%' if fundamentals.net_margin else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">FCF Margin</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.fcf_margin) ~ '%' if fundamentals.fcf_margin else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Operating Income (TTM)</div>
+            <div class="value">{{ fmt_currency(fundamentals.operating_income_ttm) }}</div>
+        </div>
+    </div>
+
+    <!-- Financial Health -->
+    <h3 class="section-subtitle">Financial Health</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">Debt/Equity</div>
+            <div class="value {{ 'positive' if fundamentals.debt_to_equity and fundamentals.debt_to_equity < 1 else 'negative' }}">
+                {{ "%.2f"|format(fundamentals.debt_to_equity) if fundamentals.debt_to_equity else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Current Ratio</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.current_ratio) if fundamentals.current_ratio else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Quick Ratio</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.quick_ratio) if fundamentals.quick_ratio else 'N/A' }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Assets</div>
+            <div class="value">{{ fmt_currency(fundamentals.total_assets) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Debt</div>
+            <div class="value">{{ fmt_currency(fundamentals.total_debt) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Net Debt</div>
+            <div class="value">{{ fmt_currency(fundamentals.net_debt) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Total Equity</div>
+            <div class="value">{{ fmt_currency(fundamentals.total_equity) }}</div>
+        </div>
+        <div class="metric">
+            <div class="label">Dividend Yield</div>
+            <div class="value">{{ "%.2f"|format(fundamentals.dividend_yield) ~ '%' if fundamentals.dividend_yield else 'N/A' }}</div>
+        </div>
+    </div>
+
+    <!-- Performance -->
+    <h3 class="section-subtitle">Price Performance</h3>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">1 Week</div>
+            <div class="value {{ 'positive' if fundamentals.perf_1w and fundamentals.perf_1w > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_1w) ~ '%') if fundamentals.perf_1w else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">1 Month</div>
+            <div class="value {{ 'positive' if fundamentals.perf_1m and fundamentals.perf_1m > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_1m) ~ '%') if fundamentals.perf_1m else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">3 Months</div>
+            <div class="value {{ 'positive' if fundamentals.perf_3m and fundamentals.perf_3m > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_3m) ~ '%') if fundamentals.perf_3m else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">6 Months</div>
+            <div class="value {{ 'positive' if fundamentals.perf_6m and fundamentals.perf_6m > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_6m) ~ '%') if fundamentals.perf_6m else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Year to Date</div>
+            <div class="value {{ 'positive' if fundamentals.perf_ytd and fundamentals.perf_ytd > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_ytd) ~ '%') if fundamentals.perf_ytd else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">1 Year</div>
+            <div class="value {{ 'positive' if fundamentals.perf_1y and fundamentals.perf_1y > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_1y) ~ '%') if fundamentals.perf_1y else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">5 Years</div>
+            <div class="value {{ 'positive' if fundamentals.perf_5y and fundamentals.perf_5y > 0 else 'negative' }}">
+                {{ ("%+.2f"|format(fundamentals.perf_5y) ~ '%') if fundamentals.perf_5y else 'N/A' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Analyst Recommendation</div>
+            <div class="value">{{ recommendation_text }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- SIMILAR STOCKS -->
+<!-- ============================================================ -->
+{% if similar_stocks %}
+<div class="card">
+    <h2>🔍 Similar Stocks to {{ symbol }}</h2>
+    <p class="section-desc">Stocks in the same sector ({{ fundamentals.sector }}) with comparable characteristics. Use these for peer comparison when making investment decisions.</p>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Price (KES)</th>
+                    <th>Market Cap</th>
+                    <th>P/E</th>
+                    <th>ROE</th>
+                    <th>Net Margin</th>
+                    <th>Rev Growth</th>
+                    <th>Why Similar</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in similar_stocks %}
+                <tr>
+                    <td><strong>{{ s.symbol }}</strong></td>
+                    <td>{{ "%.2f"|format(s.close) if s.close else 'N/A' }}</td>
+                    <td>{{ fmt_mcap(s.market_cap) }}</td>
+                    <td>{{ "%.2f"|format(s.pe_ratio) if s.pe_ratio else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(s.roe) ~ '%') if s.roe else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(s.net_margin) ~ '%') if s.net_margin else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(s.revenue_growth) ~ '%') if s.revenue_growth else 'N/A' }}</td>
+                    <td><span class="similarity-reason">{{ s.reasons|join(', ') }}</span></td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- Sector Peers -->
+{% if sector_peers %}
+<div class="card">
+    <h2>🏢 All {{ fundamentals.sector }} Sector Peers</h2>
+    <p class="section-desc">Every stock in the {{ fundamentals.sector }} sector on the NSE, ranked by market cap. Compare {{ symbol }} against its direct competitors.</p>
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Price (KES)</th>
+                    <th>Market Cap</th>
+                    <th>P/E</th>
+                    <th>ROE</th>
+                    <th>Net Margin</th>
+                    <th>Rev Growth</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in sector_peers %}
+                <tr {% if p.symbol == symbol %}class="highlight-row"{% endif %}>
+                    <td><strong>{{ p.symbol }}</strong>{% if p.symbol == symbol %} ← You are here{% endif %}</td>
+                    <td>{{ "%.2f"|format(p.close) if p.close else 'N/A' }}</td>
+                    <td>{{ fmt_mcap(p.market_cap) }}</td>
+                    <td>{{ "%.2f"|format(p.pe_ratio) if p.pe_ratio else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(p.roe) ~ '%') if p.roe else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(p.net_margin) ~ '%') if p.net_margin else 'N/A' }}</td>
+                    <td>{{ ("%.1f"|format(p.revenue_growth) ~ '%') if p.revenue_growth else 'N/A' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- ============================================================ -->
+<!-- TECHNICAL INDICATORS -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>📈 Technical Indicators</h2>
+    <div class="signals-grid">
+        {% for name in ['trend', 'ma_crossover', 'macd', 'rsi', 'bollinger', 'stochastic', 'volume'] %}
+        {% if name in signals %}
+        <span class="signal {{ signals[name] }}">{{ name|replace('_', ' ')|title }}: {{ signals[name]|replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Key Metrics -->
+<div class="card">
+    <h2>📐 Technical Values</h2>
+    <div class="metrics-grid">
+        {% for key, label in [
+            ('close', 'Close Price'), ('sma_20', 'SMA 20'), ('sma_50', 'SMA 50'),
+            ('ema_12', 'EMA 12'), ('ema_26', 'EMA 26'), ('rsi', 'RSI (14)'),
+            ('atr', 'ATR (14)'), ('macd', 'MACD'), ('macd_signal', 'MACD Signal'),
+            ('macd_hist', 'MACD Histogram'), ('stoch_k', 'Stochastic %K'),
+            ('stoch_d', 'Stochastic %D'), ('volume', 'Volume')
+        ] %}
+        {% if latest.get(key) is not none %}
+        <div class="metric">
+            <div class="label">{{ label }}</div>
+            <div class="value">{{ "%.2f"|format(latest[key]) }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Charts -->
+{% for chart in charts %}
+<div class="card">
+    <h2>{{ chart.title }}</h2>
+    <div class="chart-container">
+        <img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}">
+    </div>
+</div>
+{% endfor %}
+
+<!-- Support / Resistance -->
+{% if supports or resistances %}
+<div class="card">
+    <h2>Support &amp; Resistance Levels</h2>
+    <div class="levels-row">
+        {% if supports %}
+        <div class="level-box">
+            <h3>🟢 Support Levels (floor)</h3>
+            {% for level in supports[:5] %}
+            <span class="level-badge support">{{ "%.2f"|format(level) }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if resistances %}
+        <div class="level-box">
+            <h3>🔴 Resistance Levels (ceiling)</h3>
+            {% for level in resistances[:5] %}
+            <span class="level-badge resistance">{{ "%.2f"|format(level) }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Recent Data -->
+<div class="card">
+    <h2>Recent Trading Data (Last 10 Days)</h2>
+    {% if recent_data %}
+    <div class="table-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Open</th>
+                    <th>High</th>
+                    <th>Low</th>
+                    <th>Close</th>
+                    <th>Volume</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in recent_data %}
+                <tr>
+                    <td>{{ row.get('date', 'N/A') }}</td>
+                    <td>{{ "%.2f"|format(row.open) if row.open is not none else 'N/A' }}</td>
+                    <td>{{ "%.2f"|format(row.high) if row.high is not none else 'N/A' }}</td>
+                    <td>{{ "%.2f"|format(row.low) if row.low is not none else 'N/A' }}</td>
+                    <td>{{ "%.2f"|format(row.close) if row.close is not none else 'N/A' }}</td>
+                    <td>{{ row.volume or 'N/A' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No recent data available.</p>
+    {% endif %}
+</div>
+
+<!-- Bottom Navigation -->
+<div class="nav-bar bottom-nav">
+    <a href="index.html" class="nav-link">← Back to NSE Dashboard</a>
+    <span class="nav-date">📅 Data as of: {{ data_date }}</span>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+    /* Navigation */
+    .nav-bar {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        padding: 12px 20px;
+        background: var(--card-bg);
+        border-radius: 8px;
+        margin-bottom: 16px;
+        border: 1px solid var(--border);
+        flex-wrap: wrap;
+    }
+    .nav-link {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.9rem;
+    }
+    .nav-link:hover { text-decoration: underline; }
+    .nav-date {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        margin-left: auto;
+    }
+    .nav-source {
+        background: #dbeafe;
+        color: #1e40af;
+        padding: 2px 10px;
+        border-radius: 10px;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .bottom-nav { margin-top: 20px; margin-bottom: 0; }
+
+    /* Executive Verdict */
+    .executive-verdict {
+        text-align: center;
+        padding: 20px;
+        border-radius: 12px;
+        margin-bottom: 24px;
+    }
+    .verdict-bullish { background: linear-gradient(135deg, #dcfce7, #bbf7d0); border: 2px solid #22c55e; }
+    .verdict-bearish { background: linear-gradient(135deg, #fee2e2, #fecaca); border: 2px solid #ef4444; }
+    .verdict-neutral { background: linear-gradient(135deg, #fef3c7, #fde68a); border: 2px solid #f59e0b; }
+    .verdict-label { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+    .verdict-value { font-size: 2.5rem; font-weight: 800; margin: 8px 0; }
+    .verdict-bullish .verdict-value { color: #166534; }
+    .verdict-bearish .verdict-value { color: #991b1b; }
+    .verdict-neutral .verdict-value { color: #92400e; }
+    .verdict-desc { font-size: 0.95rem; color: var(--text); max-width: 600px; margin: 0 auto; }
+
+    /* Key Metrics Row */
+    .key-metrics-row {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 12px;
+        margin-bottom: 24px;
+    }
+    .key-metric {
+        text-align: center;
+        padding: 16px 12px;
+        background: var(--bg);
+        border-radius: 10px;
+        border: 1px solid var(--border);
+    }
+    .km-value { font-size: 1.5rem; font-weight: 700; }
+    .km-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; }
+
+    /* Explanations */
+    .explanations-section { margin-top: 8px; }
+    .explanations-section h3 { font-size: 1rem; margin-bottom: 12px; color: var(--text); }
+    .explanation-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+        gap: 12px;
+    }
+    .explanation-card {
+        background: var(--bg);
+        padding: 14px 16px;
+        border-radius: 8px;
+        border-left: 3px solid var(--accent);
+        font-size: 0.85rem;
+        line-height: 1.5;
+    }
+    .explanation-card strong { display: block; margin-bottom: 4px; color: var(--text); }
+    .explanation-card p { margin: 0; color: var(--text-muted); }
+    .explanation-card em { color: var(--text); font-style: normal; font-weight: 500; }
+    .interpretation {
+        display: inline-block;
+        margin-top: 6px;
+        padding: 3px 8px;
+        background: #dbeafe;
+        color: #1e40af;
+        border-radius: 4px;
+        font-size: 0.8rem;
+        font-weight: 600;
+    }
+
+    /* Section */
+    .section-subtitle {
+        font-size: 1rem;
+        color: var(--accent);
+        margin: 20px 0 12px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--border);
+    }
+    .section-desc {
+        color: var(--text-muted);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+    }
+    .data-date {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+        font-weight: 400;
+    }
+
+    /* Similar stocks */
+    .similarity-reason {
+        background: #ede9fe;
+        color: #5b21b6;
+        padding: 2px 8px;
+        border-radius: 8px;
+        font-size: 0.7rem;
+        font-weight: 600;
+    }
+    .highlight-row { background: #eff6ff !important; }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+        .explanation-grid { grid-template-columns: 1fr; }
+        .key-metrics-row { grid-template-columns: repeat(2, 1fr); }
+    }
+</style>
+{% endblock %}

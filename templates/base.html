@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NSE Stock Analyzer{% endblock %}</title>
+    <style>
+        :root {
+            --bullish: #22c55e;
+            --bearish: #ef4444;
+            --neutral: #f59e0b;
+            --undefined: #9ca3af;
+            --bg: #f8fafc;
+            --card-bg: #ffffff;
+            --text: #1e293b;
+            --text-muted: #64748b;
+            --border: #e2e8f0;
+            --accent: #3b82f6;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 20px;
+        }
+
+        .container { max-width: 1200px; margin: 0 auto; }
+
+        /* Header */
+        .header {
+            text-align: center;
+            padding: 30px 20px;
+            background: linear-gradient(135deg, #1e293b, #334155);
+            color: white;
+            border-radius: 12px;
+            margin-bottom: 24px;
+        }
+        .header h1 { font-size: 2rem; margin-bottom: 8px; }
+        .header .meta { color: #94a3b8; font-size: 0.9rem; }
+
+        /* Cards */
+        .card {
+            background: var(--card-bg);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+            border: 1px solid var(--border);
+        }
+        .card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--accent);
+            display: inline-block;
+        }
+
+        /* Metrics grid */
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+            gap: 12px;
+        }
+        .metric {
+            background: var(--bg);
+            padding: 12px 16px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .metric .label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
+        .metric .value { font-size: 1.25rem; font-weight: 700; margin-top: 4px; }
+
+        /* Signals */
+        .signals-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .signal {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: white;
+            text-transform: capitalize;
+        }
+        .signal.bullish, .signal.golden_cross, .signal.bullish_cross, .signal.oversold { background: var(--bullish); }
+        .signal.bearish, .signal.death_cross, .signal.bearish_cross, .signal.overbought { background: var(--bearish); }
+        .signal.neutral, .signal.within_bands, .signal.normal { background: var(--neutral); }
+        .signal.undefined, .signal.above_upper, .signal.below_lower { background: var(--undefined); }
+        .signal.high_volume { background: #8b5cf6; }
+        .signal.low_volume { background: #6b7280; }
+
+        /* Charts */
+        .chart-container {
+            text-align: center;
+            margin: 16px 0;
+        }
+        .chart-container img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+        }
+
+        /* Tables */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.9rem;
+        }
+        th, td {
+            padding: 10px 12px;
+            text-align: left;
+            border-bottom: 1px solid var(--border);
+        }
+        th {
+            background: var(--bg);
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+        }
+        tr:hover { background: #f1f5f9; }
+
+        /* Levels */
+        .levels-row {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .level-box {
+            flex: 1;
+            min-width: 200px;
+        }
+        .level-box h3 {
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+            color: var(--text-muted);
+        }
+        .level-badge {
+            display: inline-block;
+            padding: 3px 10px;
+            margin: 3px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+        }
+        .level-badge.support { background: #dcfce7; color: #166534; }
+        .level-badge.resistance { background: #fee2e2; color: #991b1b; }
+
+        /* Footer */
+        .footer {
+            text-align: center;
+            padding: 20px;
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        /* Print */
+        @media print {
+            body { background: white; padding: 0; }
+            .card { box-shadow: none; break-inside: avoid; }
+            .header { background: #1e293b !important; -webkit-print-color-adjust: exact; }
+        }
+
+        {% block extra_css %}{% endblock %}
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% block content %}{% endblock %}
+    </div>
+    <div class="footer">
+        Generated by Kenyan Stock Analyzer &mdash; {{ generated_at }}
+    </div>
+</body>
+</html>
