@@ -109,6 +109,14 @@
 <div class="card">
     <h2>📊 Executive Summary</h2>
 
+    <!-- Buy / Hold / Sell recommendation (colour-coded) -->
+    {% set _reccolors = {'buy': ['#dcfce7','#166534','#16a34a'], 'hold': ['#fef3c7','#92400e','#d97706'], 'sell': ['#fee2e2','#991b1b','#dc2626'], 'none': ['#f1f5f9','#64748b','#94a3b8']} %}
+    {% set _rc = _reccolors.get(rec_class, _reccolors['none']) %}
+    <div style="background:{{ _rc[0] }}; border-left:6px solid {{ _rc[2] }}; border-radius:8px; padding:14px 18px; margin-bottom:16px;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:{{ _rc[1] }}; opacity:0.85;">Recommendation</div>
+        <div style="font-size:1.6rem; font-weight:800; color:{{ _rc[1] }}; margin-top:2px;">{{ recommendation_text }}</div>
+    </div>
+
     <!-- Overall Signal -->
     {% set overall = signals.get('overall', 'neutral') %}
     <div class="executive-verdict verdict-{{ overall }}">

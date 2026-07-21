@@ -381,6 +381,17 @@ class ReportGenerator:
         else:
             recommendation_text = 'Strong Sell'
 
+        # Buy/Hold/Sell class for colour-coding the executive summary
+        rt = recommendation_text.lower()
+        if 'sell' in rt:
+            rec_class = 'sell'
+        elif 'buy' in rt:
+            rec_class = 'buy'
+        elif 'hold' in rt or 'neutral' in rt:
+            rec_class = 'hold'
+        else:
+            rec_class = 'none'
+
         # Render template
         template_data = {
             'symbol': symbol,
@@ -398,6 +409,7 @@ class ReportGenerator:
             'similar_stocks': similar_stocks,
             'sector_peers': sector_peers,
             'recommendation_text': recommendation_text,
+            'rec_class': rec_class,
             # Accuracy & enrichment
             'validation': validation or {},
             'score': score or {},
@@ -934,6 +946,7 @@ class ReportGenerator:
             stock_rows += f'''
             <tr>
                 <td><a href="{link}" class="stock-link"><strong>{s['symbol']}</strong></a></td>
+                <td><span class="badge {s['signal_class']}">{s['signal_label']}</span></td>
                 <td>{price_str} {mark_html}</td>
                 <td class="{chg_class}">{chg_str}</td>
                 <td>{dy_str}</td>
@@ -948,7 +961,6 @@ class ReportGenerator:
                 <td><span class="badge {s['stochastic']}">{s['stochastic']}</span></td>
                 <td><span class="badge {s['volume_signal']}">{s['volume_signal'].replace('_',' ')}</span></td>
                 <td><span class="badge {s['overall']}">{s['overall']}</span></td>
-                <td><span class="badge {s['signal_class']}">{s['signal_label']}</span></td>
                 <td>{score_html}</td>
             </tr>'''
 
@@ -1274,13 +1286,15 @@ tr:hover {{ background: #f8fafc; }}
         <table id="stockTable">
             <thead>
                 <tr>
-                    <th>Symbol</th><th>Price</th><th>Change</th>
+                    <th>Symbol</th>
+                    <th title="TradingView technical rating — Buy / Sell / Neutral">TV Signal</th>
+                    <th>Price</th><th>Change</th>
                     <th title="Dividend yield">Yield</th>
                     <th title="Dividend per share (KES). 0 = no dividend">Div KES</th>
                     <th title="Ex-dividend date. Green = upcoming (buy before it to receive the dividend)">Ex-Div Date</th>
                     <th>P/E</th><th>Market Cap</th>
                     <th>RSI</th><th>Trend</th><th>MA</th><th>MACD</th><th>Stoch</th><th>Vol</th>
-                    <th>Overall</th><th title="TradingView technical rating">TV Signal</th>
+                    <th>Overall</th>
                     <th title="Transparent 0-100 factor screen (value, quality, momentum, dividend, liquidity)">Score</th>
                 </tr>
             </thead>
