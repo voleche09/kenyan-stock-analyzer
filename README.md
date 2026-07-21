@@ -106,6 +106,34 @@ The summary is a subset of the dashboard (the dashboard itself is unchanged) and
 - **Skips non-trading days.** Weekends are excluded by the schedule, and `send_summary.py` also checks the **Kenyan public-holiday calendar** (Christmas, Boxing Day, Jamhuri Day, Madaraka Day, Mashujaa Day, Labour Day, New Year, Easter, Eid, etc. via the `holidays` library) — on those days it sends nothing. Manual runs pass `--ignore-calendar`, so you can still test on any day.
 - **Files never accumulate on GitHub.** Each run happens on a fresh, throwaway machine and starts by clearing any leftovers. The report is committed nowhere (`reports/`, `data/`, `*.pdf`, `*.xlsx` are git-ignored). The only thing kept is a **single backup artifact** (the latest PDF) — and the workflow **deletes the previous one just before generating the new one**, so at most one ever exists. That backup lets you re-download the report if an email ever fails.
 
+### Non-trading days (no email sent)
+
+The NSE does not trade on weekends or Kenyan public holidays, so there is no new data to report on those days. `send_summary.py` checks the date **in Nairobi time** and sends nothing when the market is closed:
+
+- **Weekends** — Saturday & Sunday (scheduled runs are already limited to Mon–Fri, and the code double-checks).
+- **Kenyan public holidays** — resolved automatically via the [`holidays`](https://pypi.org/project/holidays/) library (`holidays.Kenya`):
+
+  | Holiday | Date |
+  |---------|------|
+  | New Year's Day | 1 January |
+  | Good Friday | moves each year (Easter) |
+  | Easter Monday | moves each year (Easter) |
+  | Labour Day | 1 May |
+  | Madaraka Day | 1 June |
+  | Idd-ul-Fitr (Eid al-Fitr) | moves each year (Islamic calendar) |
+  | Idd-ul-Adha (Eid al-Adha) | moves each year (Islamic calendar) |
+  | Utamaduni / Mazingira Day | 10 October |
+  | Mashujaa Day | 20 October |
+  | Jamhuri Day | 12 December |
+  | Christmas Day | 25 December |
+  | Boxing Day | 26 December |
+
+**Works for every year, automatically.** The calendar is computed for the current year at run time — nothing is hard-coded to a single year, and the moving holidays (Easter, Eid) are recalculated correctly each year. Occasional one-off public holidays declared by the government are also picked up as the `holidays` library is updated.
+
+**Manual runs always send.** The "Run workflow" button passes `--ignore-calendar`, so you can test on any day (weekend or holiday). Only the automatic scheduled runs respect the calendar.
+
+**Fails open.** If the holiday check is ever unavailable, the report still runs rather than silently going missing.
+
 ### Setup (one time)
 
 1. Create a Gmail **App Password** at <https://myaccount.google.com/apppasswords> (requires 2-Step Verification). Do **not** use your normal password.
