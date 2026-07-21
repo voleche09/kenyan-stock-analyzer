@@ -53,6 +53,9 @@ jobs:
             gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
           done
 
+      # Scheduled runs skip weekends & Kenyan public holidays (send_summary.py
+      # checks the calendar). Manual runs pass --ignore-calendar so you can
+      # always test on any day.
       - name: Build and email the daily summary
         env:
           ENABLE_EMAIL_NOTIFICATIONS: 'true'
@@ -61,7 +64,12 @@ jobs:
           EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
           SMTP_HOST: smtp.gmail.com
           SMTP_PORT: '587'
-        run: python send_summary.py --force-refresh
+        run: |
+          ARGS="--force-refresh"
+          if [ "${{ github.event_name }}" != "schedule" ]; then
+            ARGS="$ARGS --ignore-calendar"
+          fi
+          python send_summary.py $ARGS
 
       # Keep ONLY the newest PDF as a single downloadable backup (in case an
       # email fails). It is replaced every run by the delete step above, so it

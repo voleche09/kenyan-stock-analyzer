@@ -39,10 +39,47 @@ setup_logging(config)
 logger = get_logger(__name__)
 
 
+def market_closed_today():
+    """
+    Return (closed: bool, reason: str|None) for the NSE today, evaluated in
+    Nairobi time. The NSE does not trade on weekends or Kenyan public
+    holidays (New Year, Easter, Labour Day, Madaraka, Mashujaa, Jamhuri,
+    Christmas, Boxing Day, Eid, etc.).
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Africa/Nairobi")).date()
+    except Exception:
+        today = datetime.now().date()
+
+    if today.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return True, "weekend"
+
+    try:
+        import holidays
+        ke = holidays.Kenya(years=today.year)
+        if today in ke:
+            return True, ke.get(today)
+    except Exception as e:
+        # If the holiday check is unavailable, don't block the report.
+        logger.warning(f"Holiday check unavailable ({e}); proceeding anyway.")
+
+    return False, None
+
+
 def main():
     logger.info("=" * 60)
     logger.info(f"NSE DAILY SUMMARY EMAIL — {datetime.now():%Y-%m-%d %H:%M}")
     logger.info("=" * 60)
+
+    # Skip weekends and Kenyan public holidays (NSE is closed — no new data).
+    # Pass --ignore-calendar to force a run anyway (e.g. manual testing).
+    if '--ignore-calendar' not in sys.argv:
+        closed, reason = market_closed_today()
+        if closed:
+            logger.info(f"NSE is closed today ({reason}) — skipping summary email.")
+            print(f"Skipped: NSE closed today ({reason}). No email sent.")
+            return
 
     force = '--force-refresh' in sys.argv
 

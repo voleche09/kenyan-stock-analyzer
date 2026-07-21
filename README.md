@@ -103,6 +103,7 @@ The summary is a subset of the dashboard (the dashboard itself is unchanged) and
 
 - `send_summary.py` runs a lean pipeline (data → analysis → fundamentals → price validation → scoring), builds the PDF via `ReportGenerator.generate_summary`, and emails it.
 - `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button.
+- **Skips non-trading days.** Weekends are excluded by the schedule, and `send_summary.py` also checks the **Kenyan public-holiday calendar** (Christmas, Boxing Day, Jamhuri Day, Madaraka Day, Mashujaa Day, Labour Day, New Year, Easter, Eid, etc. via the `holidays` library) — on those days it sends nothing. Manual runs pass `--ignore-calendar`, so you can still test on any day.
 - **Files never accumulate on GitHub.** Each run happens on a fresh, throwaway machine and starts by clearing any leftovers. The report is committed nowhere (`reports/`, `data/`, `*.pdf`, `*.xlsx` are git-ignored). The only thing kept is a **single backup artifact** (the latest PDF) — and the workflow **deletes the previous one just before generating the new one**, so at most one ever exists. That backup lets you re-download the report if an email ever fails.
 
 ### Setup (one time)
