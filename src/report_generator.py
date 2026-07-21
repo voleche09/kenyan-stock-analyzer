@@ -35,6 +35,7 @@ import seaborn as sns
 import numpy as np
 import pandas as pd
 from jinja2 import Environment, FileSystemLoader
+from fundamental_analysis import FundamentalAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +278,8 @@ class ReportGenerator:
 
     def generate_stock_report(self, symbol, analysis_result, report_type='html',
                              fundamentals=None, similar_stocks=None,
-                             sector_peers=None):
+                             sector_peers=None, validation=None, score=None,
+                             alerts=None, sector_medians=None, usd_kes=None):
         """
         Generate a per-stock report with charts, signals, fundamentals,
         similar stocks, and plain-English explanations.
@@ -354,10 +356,20 @@ class ReportGenerator:
             }
             recent_records.append(rec)
 
-        # Recommendation text
+        # Recommendation text.
+        # Prefer the analyst mark (1=Strong Buy .. 5=Strong Sell) when
+        # available; otherwise fall back to TradingView's technical-rating
+        # gauge, which covers every stock. The label states the source so
+        # it is clear this is TradingView's rating, not our own advice.
         rec = fundamentals.get('recommendation')
         if rec is None:
-            recommendation_text = 'No analyst coverage'
+            label, _ = FundamentalAnalysis.signal_from_tech_rating(
+                fundamentals.get('tech_rating')
+            )
+            if label == 'N/A':
+                recommendation_text = 'No analyst coverage'
+            else:
+                recommendation_text = f'{label} (TradingView technical rating)'
         elif rec <= 1.5:
             recommendation_text = 'Strong Buy'
         elif rec <= 2.5:
@@ -386,6 +398,12 @@ class ReportGenerator:
             'similar_stocks': similar_stocks,
             'sector_peers': sector_peers,
             'recommendation_text': recommendation_text,
+            # Accuracy & enrichment
+            'validation': validation or {},
+            'score': score or {},
+            'alerts': alerts or [],
+            'sector_context': self._sector_context(fundamentals, sector_medians),
+            'usd_kes': usd_kes or {},
             # Helper functions for templates
             'fmt_mcap': self._fmt_mcap,
             'fmt_currency': self._fmt_currency,
@@ -400,6 +418,17 @@ class ReportGenerator:
         return self._save_report(f"{symbol}_report", html_content, report_type)
 
     # ---- Formatting helpers for templates ----
+
+    @staticmethod
+    def _sector_context(fundamentals, sector_medians):
+        """Valuation vs sector median for the stock report (fails safe)."""
+        if not fundamentals or not sector_medians:
+            return {}
+        try:
+            from market_context import valuation_vs_sector
+            return valuation_vs_sector(fundamentals, sector_medians)
+        except Exception:
+            return {}
 
     @staticmethod
     def _fmt_mcap(value):
@@ -708,7 +737,8 @@ class ReportGenerator:
     # ============================================================
 
     def generate_index(self, analysis_results, sector_data=None, breadth=None,
-                       report_files=None, fundamentals_data=None):
+                       report_files=None, fundamentals_data=None,
+                       validations=None, scores=None, alerts=None, usd_kes=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -735,6 +765,11 @@ class ReportGenerator:
             # Get fundamental data for this stock
             fund = (fundamentals_data or {}).get(symbol, {})
 
+            # TradingView Buy/Sell signal from the technical-rating gauge
+            rating_label, rating_class = FundamentalAnalysis.signal_from_tech_rating(
+                fund.get('tech_rating')
+            )
+
             stock = {
                 'symbol': symbol,
                 'price': latest.get('close'),
@@ -753,6 +788,19 @@ class ReportGenerator:
                 'roe': fund.get('roe'),
                 'peg_ratio': fund.get('peg_ratio'),
                 'sector': fund.get('sector', ''),
+                # TradingView Buy/Sell signal
+                'signal_label': rating_label,
+                'signal_class': rating_class,
+                # Dividend yield (key for income-focused NSE investors)
+                'dividend_yield': fund.get('dividend_yield'),
+                # Dividend amount (KES/share) and ex-dividend date
+                'dps': fund.get('dps_fy'),
+                'ex_date': fund.get('dividend_ex_date'),
+                'ex_upcoming': fund.get('dividend_ex_date_is_upcoming'),
+                # Transparent factor score (0-100)
+                'score': (scores or {}).get(symbol, {}).get('overall'),
+                # Price validation (independent cross-check + freshness)
+                'validation': (validations or {}).get(symbol, {}),
             }
             stocks.append(stock)
 
@@ -796,6 +844,8 @@ class ReportGenerator:
             neutral=neutral,
             total=len(stocks),
             data_date=data_date,
+            alerts=alerts,
+            usd_kes=usd_kes,
         )
 
         path = os.path.join(self.output_dir, 'index.html')
@@ -806,10 +856,33 @@ class ReportGenerator:
 
     def _build_index_html(self, stocks, gainers, losers, sectors, breadth,
                           sector_chart, bullish, bearish, neutral, total,
-                          data_date=None):
+                          data_date=None, alerts=None, usd_kes=None):
         """Build the single-page index dashboard HTML."""
         now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
         data_date_str = data_date or datetime.now().strftime('%Y-%m-%d')
+
+        # ---- Data-quality summary (price validation) ----
+        v_ok = v_mismatch = v_stale = v_unverified = 0
+        mismatch_list = []
+        for s in stocks:
+            st = (s.get('validation') or {}).get('status')
+            if st == 'ok':
+                v_ok += 1
+            elif st == 'mismatch':
+                v_mismatch += 1
+                mismatch_list.append(s)
+            elif st == 'stale':
+                v_stale += 1
+            else:
+                v_unverified += 1
+
+        # Price-validation marker per status
+        pv_marker = {
+            'ok': ('✓', '#16a34a', 'Verified against independent source'),
+            'mismatch': ('❗', '#dc2626', ''),
+            'stale': ('🕒', '#d97706', ''),
+            'unverified': ('', '#94a3b8', 'No independent source to compare'),
+        }
 
         # Build stock rows
         stock_rows = ''
@@ -822,11 +895,50 @@ class ReportGenerator:
             mcap_str = self._fmt_mcap(s['market_cap']) if s.get('market_cap') else '—'
             link = s['report_file'] if s['report_file'] else '#'
 
+            # Dividend yield
+            dy = s.get('dividend_yield')
+            dy_str = f"{dy:.1f}%" if dy else '—'
+
+            # Dividend amount (KES/share) — 0 when the stock pays nothing
+            dps = s.get('dps')
+            if dps and dps > 0:
+                div_html = f'<span class="div-pay">{dps:g}</span>'
+            else:
+                div_html = '<span class="div-zero">0</span>'
+
+            # Ex-dividend date — upcoming (still buyable) vs past vs none
+            ex_date = s.get('ex_date')
+            if ex_date and s.get('ex_upcoming'):
+                exdate_html = f'<span class="exdate-upcoming" title="Buy before this date to receive the dividend">{ex_date}</span>'
+            elif ex_date:
+                exdate_html = f'<span class="exdate-past" title="Most recent ex-dividend date (already passed)">{ex_date}</span>'
+            else:
+                exdate_html = '<span class="exdate-none">—</span>'
+
+            # Score badge (colour by band)
+            score = s.get('score')
+            if score is None:
+                score_html = '—'
+            else:
+                sc_class = 'score-high' if score >= 70 else 'score-mid' if score >= 45 else 'score-low'
+                score_html = f'<span class="score {sc_class}">{score}</span>'
+
+            # Price-validation marker (with tooltip)
+            val = s.get('validation') or {}
+            status = val.get('status', 'unverified')
+            mark, color, default_tip = pv_marker.get(status, ('', '#94a3b8', ''))
+            tip = val.get('note') or default_tip
+            mark_html = (f'<span class="pv-mark" style="color:{color}" title="{tip}">{mark}</span>'
+                         if mark else '')
+
             stock_rows += f'''
             <tr>
                 <td><a href="{link}" class="stock-link"><strong>{s['symbol']}</strong></a></td>
-                <td>{price_str}</td>
+                <td>{price_str} {mark_html}</td>
                 <td class="{chg_class}">{chg_str}</td>
+                <td>{dy_str}</td>
+                <td>{div_html}</td>
+                <td>{exdate_html}</td>
                 <td>{pe_str}</td>
                 <td class="mcap-cell">{mcap_str}</td>
                 <td>{rsi_str}</td>
@@ -836,6 +948,8 @@ class ReportGenerator:
                 <td><span class="badge {s['stochastic']}">{s['stochastic']}</span></td>
                 <td><span class="badge {s['volume_signal']}">{s['volume_signal'].replace('_',' ')}</span></td>
                 <td><span class="badge {s['overall']}">{s['overall']}</span></td>
+                <td><span class="badge {s['signal_class']}">{s['signal_label']}</span></td>
+                <td>{score_html}</td>
             </tr>'''
 
         # Build gainer/loser rows
@@ -880,6 +994,116 @@ class ReportGenerator:
         if sector_chart:
             sector_chart_html = f'<img src="data:image/png;base64,{sector_chart}" class="chart-img" alt="Sector Performance">'
 
+        # ---- Alerts section ----
+        alerts_html = ''
+        if alerts:
+            cards = ''
+            for sym in sorted(alerts.keys()):
+                items = alerts[sym]
+                if not items:
+                    continue
+                items_html = '<br>'.join(items)
+                cards += (f'<div class="alert-card"><div class="sym">{sym}</div>'
+                          f'<div class="items">{items_html}</div></div>')
+            if cards:
+                alerts_html = f'''
+<div class="section">
+    <h2>🔔 Alerts &amp; Signals</h2>
+    <div class="alerts-grid">{cards}</div>
+</div>'''
+
+        # ---- Data-quality section (price validation) ----
+        dq_html = ''
+        if (v_ok + v_mismatch + v_stale + v_unverified) > 0:
+            mismatch_note = ''
+            if mismatch_list:
+                items = ', '.join(
+                    f"{m['symbol']} ({(m.get('validation') or {}).get('pct_diff'):+.1f}%)"
+                    for m in mismatch_list
+                )
+                mismatch_note = (f'<div class="dq-note dq-mismatch">⚠️ Price differs from '
+                                 f'independent source for: {items}</div>')
+            dq_html = f'''
+<div class="section">
+    <h2>✅ Data Quality</h2>
+    <div class="stats">
+        <div class="stat-card"><div class="stat-value bullish">{v_ok}</div><div class="stat-label">Verified</div></div>
+        <div class="stat-card"><div class="stat-value bearish">{v_mismatch}</div><div class="stat-label">Price mismatch</div></div>
+        <div class="stat-card"><div class="stat-value neutral">{v_stale}</div><div class="stat-label">Stale / thin</div></div>
+        <div class="stat-card"><div class="stat-value">{v_unverified}</div><div class="stat-label">Unverified</div></div>
+    </div>
+    <div class="dq-note">Prices cross-checked against an independent NSE source (afx.kwayisi.org).
+    ✓ = matches within threshold · ❗ = differs · 🕒 = last traded &gt;1 day ago. TradingView data is ~15&nbsp;min delayed.</div>
+    {mismatch_note}
+</div>'''
+
+        # ---- FX chip for the header ----
+        fx_html = ''
+        if usd_kes and usd_kes.get('rate'):
+            fx_html = f" · 💵 USD/KES {usd_kes['rate']:.2f}"
+
+        # ---- Dividend calendar (ex-dividend dates, colour-coded by proximity) ----
+        today = datetime.now().date()
+        cal_rows = []
+        for s in stocks:
+            ex = s.get('ex_date')
+            if not ex:
+                continue
+            try:
+                d = datetime.strptime(ex, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                continue
+            delta = (d - today).days
+            if delta < 0:
+                cls, when, group, sortk = 'cal-passed', f'{-delta}d ago', 'past', -delta
+            elif delta <= 30:
+                cls, when, group, sortk = 'cal-near', (f'in {delta}d' if delta else 'today'), 'up', delta
+            else:
+                cls, when, group, sortk = 'cal-far', f'in {delta}d', 'up', delta
+            cal_rows.append({
+                'symbol': s['symbol'], 'dps': s.get('dps'),
+                'yield': s.get('dividend_yield'), 'ex': ex,
+                'cls': cls, 'when': when, 'group': group, 'sortk': sortk,
+            })
+
+        def _cal_table(rows, empty_msg):
+            if not rows:
+                return f'<p class="dq-note">{empty_msg}</p>'
+            body = ''
+            for r in rows:
+                dps = f"{r['dps']:g}" if r['dps'] else '0'
+                yld = f"{r['yield']:.1f}%" if r['yield'] else '—'
+                body += (f'<tr><td><strong>{r["symbol"]}</strong></td>'
+                         f'<td>{dps}</td><td>{yld}</td>'
+                         f'<td><span class="cal-chip {r["cls"]}">{r["ex"]}</span></td>'
+                         f'<td>{r["when"]}</td></tr>')
+            return ('<table><thead><tr><th>Symbol</th><th>Div KES</th><th>Yield</th>'
+                    f'<th>Ex-Date</th><th>When</th></tr></thead><tbody>{body}</tbody></table>')
+
+        upcoming = sorted([r for r in cal_rows if r['group'] == 'up'], key=lambda r: r['sortk'])
+        past = sorted([r for r in cal_rows if r['group'] == 'past'], key=lambda r: r['sortk'])
+        dividend_calendar_html = f'''
+<div class="section">
+    <h2>💵 Dividend Calendar</h2>
+    <div class="cal-legend">
+        <span class="cal-chip cal-near">soon (≤30d)</span>
+        <span class="cal-chip cal-far">later (&gt;30d)</span>
+        <span class="cal-chip cal-passed">passed</span>
+    </div>
+    <div class="grid-2">
+        <div>
+            <h3 class="cal-h3">🟢 Upcoming Ex-Dividend Dates <span class="cal-count">({len(upcoming)})</span></h3>
+            <div class="table-wrap">{_cal_table(upcoming, "No upcoming ex-dividend dates in the current data.")}</div>
+        </div>
+        <div>
+            <h3 class="cal-h3">🔴 Past Ex-Dividend Dates <span class="cal-count">({len(past)})</span></h3>
+            <div class="table-wrap">{_cal_table(past, "No past ex-dividend dates recorded.")}</div>
+        </div>
+    </div>
+    <div class="dq-note">Buy <strong>before</strong> a green/yellow ex-date to receive that dividend. Div KES = dividend per share for the year (0 = none).</div>
+    <div class="dq-note dq-mismatch">⚠️ Dividend <strong>payment dates</strong> are not published by our data feed (TradingView provides ex-dividend dates only, and free NSE sources checked were stale). On the NSE, payment typically follows the ex-date by ~3–8 weeks — confirm the exact date in the company's official NSE announcement.</div>
+</div>'''
+
         return f'''<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -920,9 +1144,43 @@ tr:hover {{ background: #f8fafc; }}
 
 /* Badges */
 .badge {{ padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: capitalize; }}
-.bullish, .golden_cross, .bullish_cross, .oversold {{ background: #dcfce7; color: #166534; }}
-.bearish, .death_cross, .bearish_cross, .overbought {{ background: #fee2e2; color: #991b1b; }}
+.bullish, .golden_cross, .bullish_cross, .oversold, .buy {{ background: #dcfce7; color: #166534; }}
+.bearish, .death_cross, .bearish_cross, .overbought, .sell {{ background: #fee2e2; color: #991b1b; }}
 .neutral, .within_bands, .normal {{ background: #fef3c7; color: #92400e; }}
+.strong_buy {{ background: #16a34a; color: #ffffff; }}
+.strong_sell {{ background: #dc2626; color: #ffffff; }}
+
+/* Score chips */
+.score {{ display: inline-block; min-width: 30px; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.75rem; text-align: center; }}
+.score-high {{ background: #dcfce7; color: #166534; }}
+.score-mid {{ background: #fef3c7; color: #92400e; }}
+.score-low {{ background: #fee2e2; color: #991b1b; }}
+.pv-mark {{ font-size: 0.75rem; cursor: help; }}
+
+/* Dividend amount (teal "money" highlight) vs 0 (muted) */
+.div-pay {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #ccfbf1; color: #0f766e; font-weight: 700; }}
+.div-zero {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #f1f5f9; color: #94a3b8; font-weight: 600; }}
+/* Ex-dividend date — a different colour family from the amount */
+.exdate-upcoming {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #16a34a; color: #ffffff; font-weight: 700; cursor: help; }}
+.exdate-past {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #e0e7ff; color: #3730a3; font-weight: 600; cursor: help; }}
+.exdate-none {{ color: #cbd5e1; }}
+
+/* Dividend calendar chips: green=soon, yellow=later, red=passed */
+.cal-chip {{ display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }}
+.cal-near {{ background: #16a34a; color: #ffffff; }}
+.cal-far {{ background: #fde68a; color: #92400e; }}
+.cal-passed {{ background: #fecaca; color: #991b1b; }}
+.cal-legend {{ display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }}
+.cal-h3 {{ font-size: 0.95rem; margin-bottom: 10px; }}
+.cal-count {{ color: #94a3b8; font-weight: 400; }}
+
+/* Alerts */
+.alerts-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }}
+.alert-card {{ background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #3b82f6; border-radius: 8px; padding: 10px 12px; }}
+.alert-card .sym {{ font-weight: 700; color: #3b82f6; margin-bottom: 4px; }}
+.alert-card .items {{ font-size: 0.8rem; color: #475569; line-height: 1.5; }}
+.dq-note {{ font-size: 0.8rem; color: #64748b; margin-top: 8px; }}
+.dq-mismatch {{ color: #991b1b; }}
 .undefined {{ background: #f1f5f9; color: #64748b; }}
 .high_volume {{ background: #ede9fe; color: #5b21b6; }}
 .low_volume {{ background: #f1f5f9; color: #64748b; }}
@@ -963,7 +1221,7 @@ tr:hover {{ background: #f8fafc; }}
 
 <div class="header">
     <h1>🇰🇪 NSE Daily Dashboard</h1>
-    <div class="date">{now} · {total} stocks analyzed · 📅 Financial data: {data_date_str} · Source: TradingView</div>
+    <div class="date">{now} · {total} stocks analyzed · 📅 Financial data: {data_date_str} · Source: TradingView{fx_html}</div>
 </div>
 
 <!-- Market Stats -->
@@ -974,6 +1232,12 @@ tr:hover {{ background: #f8fafc; }}
     <div class="stat-card"><div class="stat-value neutral">{neutral}</div><div class="stat-label">Neutral</div></div>
     {breadth_html}
 </div>
+
+{dq_html}
+
+{dividend_calendar_html}
+
+{alerts_html}
 
 <!-- Sector Performance -->
 <div class="section">
@@ -1010,9 +1274,14 @@ tr:hover {{ background: #f8fafc; }}
         <table id="stockTable">
             <thead>
                 <tr>
-                    <th>Symbol</th><th>Price</th><th>Change</th><th>P/E</th><th>Market Cap</th>
+                    <th>Symbol</th><th>Price</th><th>Change</th>
+                    <th title="Dividend yield">Yield</th>
+                    <th title="Dividend per share (KES). 0 = no dividend">Div KES</th>
+                    <th title="Ex-dividend date. Green = upcoming (buy before it to receive the dividend)">Ex-Div Date</th>
+                    <th>P/E</th><th>Market Cap</th>
                     <th>RSI</th><th>Trend</th><th>MA</th><th>MACD</th><th>Stoch</th><th>Vol</th>
-                    <th>Overall</th>
+                    <th>Overall</th><th title="TradingView technical rating">TV Signal</th>
+                    <th title="Transparent 0-100 factor screen (value, quality, momentum, dividend, liquidity)">Score</th>
                 </tr>
             </thead>
             <tbody>{stock_rows}</tbody>
