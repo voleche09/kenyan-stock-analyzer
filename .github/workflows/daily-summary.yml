@@ -12,6 +12,9 @@ jobs:
   summary:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: write   # needed to delete the previous run's artifact
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -36,6 +39,20 @@ jobs:
       - name: Start clean (remove any stale reports/data)
         run: rm -rf reports data logs && mkdir -p reports data logs
 
+      # Delete the PREVIOUS run's artifact just before generating the new one,
+      # so at most ONE summary artifact ever exists on GitHub (the latest).
+      # Nothing accumulates and no meaningful storage is used.
+      - name: Delete previous summary artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ids=$(gh api "repos/${{ github.repository }}/actions/artifacts" --paginate \
+                  --jq '.artifacts[] | select(.name=="nse-summary") | .id')
+          for id in $ids; do
+            echo "Deleting old artifact $id"
+            gh api -X DELETE "repos/${{ github.repository }}/actions/artifacts/$id" || true
+          done
+
       - name: Build and email the daily summary
         env:
           ENABLE_EMAIL_NOTIFICATIONS: 'true'
@@ -46,13 +63,14 @@ jobs:
           SMTP_PORT: '587'
         run: python send_summary.py --force-refresh
 
-      # The generated PDF/HTML live only on the ephemeral runner and are
-      # discarded when the job finishes — they are the emailed deliverable,
-      # not stored on GitHub. No artifact upload, no commit back to the repo,
-      # so nothing accumulates in the repository or in Actions storage.
-      - name: Confirm nothing is left behind
+      # Keep ONLY the newest PDF as a single downloadable backup (in case an
+      # email fails). It is replaced every run by the delete step above, so it
+      # never accumulates. Nothing is ever committed back to the repo.
+      - name: Upload latest summary (single backup, replaced each run)
         if: always()
-        run: |
-          echo "Generated files on the runner (discarded after this job):"
-          ls -1 reports 2>/dev/null || echo "  (none)"
-          echo "Repo stays clean — reports/, data/, *.pdf, *.xlsx are git-ignored."
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-summary
+          path: reports/nse_summary_*.pdf
+          if-no-files-found: ignore
+          retention-days: 7
