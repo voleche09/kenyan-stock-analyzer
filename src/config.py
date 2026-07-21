@@ -47,6 +47,23 @@ class Config:
         self.stoch_d = int(os.getenv('STOCH_D', '3'))
         self.volume_sma_period = int(os.getenv('VOLUME_SMA_PERIOD', '20'))
 
+        # ---- Accuracy & enrichment ----
+        self.enable_price_validation = (
+            os.getenv('ENABLE_PRICE_VALIDATION', 'true').lower() == 'true'
+        )
+        self.price_disagree_threshold_pct = float(
+            os.getenv('PRICE_DISAGREE_THRESHOLD_PCT', '1.0')
+        )
+        self.enable_scoring = (
+            os.getenv('ENABLE_SCORING', 'true').lower() == 'true'
+        )
+        self.enable_history = (
+            os.getenv('ENABLE_HISTORY', 'true').lower() == 'true'
+        )
+        self.enable_fx = (
+            os.getenv('ENABLE_FX', 'true').lower() == 'true'
+        )
+
         # ---- Report settings ----
         self.report_format = os.getenv('REPORT_FORMAT', 'html')
         self.report_directory = str(

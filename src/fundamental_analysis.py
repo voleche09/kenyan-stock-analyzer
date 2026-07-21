@@ -231,6 +231,16 @@ class FundamentalAnalysis:
 
         return data
 
+    @staticmethod
+    def _ts_to_date(ts):
+        """Convert a Unix timestamp (seconds) to a YYYY-MM-DD string, or None."""
+        if ts is None:
+            return None
+        try:
+            return datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d")
+        except (ValueError, TypeError, OSError):
+            return None
+
     async def _scan_kenya_market(self) -> dict:
         """Scan Kenya market on TradingView for all stocks with full fundamentals."""
         try:
@@ -240,9 +250,20 @@ class FundamentalAnalysis:
             logger.error("tvkit not installed. Run: pip install tvkit")
             return {}
 
+        # Extra columns not in COMPREHENSIVE_FULL that we surface in reports.
+        extra_columns = [
+            'dividend_ex_date_upcoming', 'dividend_ex_date_recent',
+            'earnings_release_next_date', 'earnings_release_date',
+            'price_52_week_high', 'price_52_week_low', 'book_value_per_share_fq',
+            'average_volume_10d_calc', 'average_volume_30d_calc', 'Value.Traded',
+        ]
+        columns = list(ColumnSets.COMPREHENSIVE_FULL) + [
+            c for c in extra_columns if c not in ColumnSets.COMPREHENSIVE_FULL
+        ]
+
         async with ScannerService() as scanner:
             request = ScannerRequest(
-                columns=ColumnSets.COMPREHENSIVE_FULL,
+                columns=columns,
                 options=ScannerOptions(filter_lang='pinescript_v5'),
                 range=(0, 100),
                 sort=SortConfig(sortBy='name', sortOrder='asc'),
@@ -309,9 +330,28 @@ class FundamentalAnalysis:
                         "capital_expenditures_ttm": d.get('capital_expenditures_ttm'),
 
                         # === Dividends ===
-                        "dividend_yield": getattr(stock, 'dividends_yield_current', None),
+                        "dividend_yield": getattr(stock, 'dividends_yield_current', None)
+                            or d.get('dividends_yield_current') or d.get('dividends_yield'),
                         "dividend_payout_ratio": d.get('dividend_payout_ratio_ttm'),
                         "dps_fy": d.get('dps_common_stock_prim_issue_fy'),
+                        "dividend_ex_date": self._ts_to_date(
+                            d.get('dividend_ex_date_upcoming') or d.get('dividend_ex_date_recent')
+                        ),
+                        "dividend_ex_date_is_upcoming": d.get('dividend_ex_date_upcoming') is not None,
+
+                        # === Earnings calendar ===
+                        "earnings_next_date": self._ts_to_date(d.get('earnings_release_next_date')),
+                        "earnings_last_date": self._ts_to_date(d.get('earnings_release_date')),
+
+                        # === 52-week range & book value ===
+                        "price_52w_high": d.get('price_52_week_high'),
+                        "price_52w_low": d.get('price_52_week_low'),
+                        "book_value_per_share": d.get('book_value_per_share_fq'),
+
+                        # === Liquidity ===
+                        "avg_volume_10d": d.get('average_volume_10d_calc'),
+                        "avg_volume_30d": d.get('average_volume_30d_calc'),
+                        "value_traded": d.get('Value.Traded'),
 
                         # === Classification ===
                         "sector": getattr(stock, 'sector', None) or d.get('sector', 'Unknown'),
@@ -323,6 +363,10 @@ class FundamentalAnalysis:
                         "change_pct": d.get('change'),
                         "rsi": d.get('RSI'),
                         "recommendation": getattr(stock, 'recommendation_mark', None),
+                        # TradingView technical-rating gauge (Recommend.All),
+                        # a value in [-1, 1]. Available for ALL stocks, unlike
+                        # the analyst mark which only covers a handful.
+                        "tech_rating": d.get('Recommend.All'),
 
                         # === Performance ===
                         "perf_1w": d.get('Perf.W'),
@@ -655,6 +699,39 @@ class FundamentalAnalysis:
         if rec <= 4.5:
             return "Sell — analysts recommend selling this stock"
         return "Strong Sell — analysts are very bearish on this stock"
+
+    @staticmethod
+    def signal_from_tech_rating(rating):
+        """
+        Map TradingView's technical-rating gauge (Recommend.All, a value in
+        [-1, 1]) to a Buy/Sell label and a CSS class token.
+
+        Uses TradingView's own standard thresholds:
+          >=  0.5  Strong Buy
+          >=  0.1  Buy
+          > -0.1  Neutral
+          > -0.5  Sell
+          else     Strong Sell
+
+        Returns a (label, css_class) tuple. css_class is one of
+        strong_buy / buy / neutral / sell / strong_sell, or 'undefined'
+        when no rating is available.
+        """
+        if rating is None:
+            return ("N/A", "undefined")
+        try:
+            r = float(rating)
+        except (ValueError, TypeError):
+            return ("N/A", "undefined")
+        if r >= 0.5:
+            return ("Strong Buy", "strong_buy")
+        if r >= 0.1:
+            return ("Buy", "buy")
+        if r > -0.1:
+            return ("Neutral", "neutral")
+        if r > -0.5:
+            return ("Sell", "sell")
+        return ("Strong Sell", "strong_sell")
 
 
 # ---- Test ----

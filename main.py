@@ -129,6 +129,67 @@ def main():
         )
         logger.info(f"Fundamental data loaded for {len(fundamentals_data)} stocks")
 
+        # ---- Price validation (independent source + freshness) ----
+        validations = {}
+        if config.enable_price_validation:
+            logger.info("Validating prices against independent source...")
+            try:
+                from price_validation import PriceValidator
+                pv = PriceValidator(
+                    cache_dir=config.cache_dir,
+                    disagree_threshold_pct=config.price_disagree_threshold_pct,
+                )
+                pv.fetch_reference_prices()
+                for symbol, result in analysis_results.items():
+                    if not result:
+                        continue
+                    price = result.get('latest', {}).get('close')
+                    hist = stock_data.get(symbol)
+                    validations[symbol] = pv.validate(symbol, price, hist)
+                n_mismatch = sum(1 for v in validations.values() if v['status'] == 'mismatch')
+                n_verified = sum(1 for v in validations.values() if v['status'] == 'ok')
+                logger.info(f"  Price validation: {n_verified} verified, {n_mismatch} mismatched")
+            except Exception as e:
+                logger.warning(f"Price validation skipped: {e}")
+
+        # ---- Market context: sector medians + USD/KES ----
+        sector_medians = {}
+        usd_kes = None
+        try:
+            from market_context import compute_sector_medians, fetch_usd_kes
+            sector_medians = compute_sector_medians(fundamentals_data)
+            if config.enable_fx:
+                usd_kes = fetch_usd_kes()
+        except Exception as e:
+            logger.warning(f"Market context skipped: {e}")
+
+        # ---- Factor scoring + alerts ----
+        scores = {}
+        alerts = {}
+        if config.enable_scoring:
+            logger.info("Scoring stocks (transparent factor screen)...")
+            try:
+                from scoring import score_stock, generate_alerts
+                for symbol, result in analysis_results.items():
+                    if not result:
+                        continue
+                    fund = fundamentals_data.get(symbol, {})
+                    scores[symbol] = score_stock(symbol, result, fund)
+                    a = generate_alerts(symbol, result, fund, validations.get(symbol))
+                    if a:
+                        alerts[symbol] = a
+            except Exception as e:
+                logger.warning(f"Scoring skipped: {e}")
+
+        # ---- Persist daily history snapshot ----
+        if config.enable_history:
+            try:
+                from history_tracker import HistoryTracker
+                ht = HistoryTracker(data_dir=config.cache_dir)
+                ht.record_snapshot(analysis_results, fundamentals_data, scores, validations)
+            except Exception as e:
+                logger.warning(f"History snapshot skipped: {e}")
+
         # ---- Individual reports (only if --detailed) ----
         report_files = {}
         if args.detailed:
@@ -151,6 +212,11 @@ def main():
                         fundamentals=fund,
                         similar_stocks=similar,
                         sector_peers=sector_peers,
+                        validation=validations.get(symbol),
+                        score=scores.get(symbol),
+                        alerts=alerts.get(symbol),
+                        sector_medians=sector_medians,
+                        usd_kes=usd_kes,
                     )
                     if path:
                         fname = os.path.basename(path) if isinstance(path, str) else os.path.basename(path[0])
@@ -174,6 +240,10 @@ def main():
             analysis_results, sector_data=sector_data, breadth=breadth,
             report_files=report_files,
             fundamentals_data=fundamentals_data,
+            validations=validations,
+            scores=scores,
+            alerts=alerts,
+            usd_kes=usd_kes,
         )
 
         # ---- Email ----
