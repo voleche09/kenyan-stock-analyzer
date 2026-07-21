@@ -102,7 +102,8 @@ The summary is a subset of the dashboard (the dashboard itself is unchanged) and
 ### How it works
 
 - `send_summary.py` runs a lean pipeline (data → analysis → fundamentals → price validation → scoring), builds the PDF via `ReportGenerator.generate_summary`, and emails it.
-- `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button. Each run also keeps the PDF as a downloadable artifact for 14 days.
+- `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button.
+- **Nothing is stored on GitHub.** Each run starts on a fresh, empty machine, generates the report, emails it, and is then discarded. No PDF/HTML is uploaded as an artifact or committed to the repo (`reports/`, `data/`, `*.pdf`, `*.xlsx` are git-ignored), so files never accumulate and no storage is consumed.
 
 ### Setup (one time)
 

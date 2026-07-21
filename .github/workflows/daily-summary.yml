@@ -33,6 +33,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Start clean (remove any stale reports/data)
+        run: rm -rf reports data logs && mkdir -p reports data logs
+
       - name: Build and email the daily summary
         env:
           ENABLE_EMAIL_NOTIFICATIONS: 'true'
@@ -43,11 +46,13 @@ jobs:
           SMTP_PORT: '587'
         run: python send_summary.py --force-refresh
 
-      - name: Upload summary as a build artifact (backup copy)
+      # The generated PDF/HTML live only on the ephemeral runner and are
+      # discarded when the job finishes — they are the emailed deliverable,
+      # not stored on GitHub. No artifact upload, no commit back to the repo,
+      # so nothing accumulates in the repository or in Actions storage.
+      - name: Confirm nothing is left behind
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: nse-summary
-          path: reports/nse_summary_*.pdf
-          if-no-files-found: ignore
-          retention-days: 14
+        run: |
+          echo "Generated files on the runner (discarded after this job):"
+          ls -1 reports 2>/dev/null || echo "  (none)"
+          echo "Repo stays clean — reports/, data/, *.pdf, *.xlsx are git-ignored."
