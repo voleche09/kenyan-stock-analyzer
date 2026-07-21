@@ -87,13 +87,62 @@ Add to your crontab (`crontab -e`):
 
 Nairobi is UTC+3, so 15:00 EAT = 12:00 UTC.
 
+## Daily Summary Email (automated, cloud-based)
+
+Get a **1-page PDF summary of key metrics emailed to you every weekday at ~10 pm EAT** — automatically, on GitHub's servers, whether or not your computer is on.
+
+The summary is a subset of the dashboard (the dashboard itself is unchanged) and includes:
+- Market pulse — bullish/bearish counts, breadth, USD/KES
+- **Data quality** — how many prices were independently verified vs flagged as mismatched/stale
+- Your watchlist — TV signal (Buy/Sell), price, change, yield, score
+- Top gainers/losers
+- **Upcoming ex-dividends** (next 30 days)
+- Key alerts (strong Buy/Sell, oversold, high yield, etc.)
+
+### How it works
+
+- `send_summary.py` runs a lean pipeline (data → analysis → fundamentals → price validation → scoring), builds the PDF via `ReportGenerator.generate_summary`, and emails it.
+- `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button. Each run also keeps the PDF as a downloadable artifact for 14 days.
+
+### Setup (one time)
+
+1. Create a Gmail **App Password** at <https://myaccount.google.com/apppasswords> (requires 2-Step Verification). Do **not** use your normal password.
+2. In your GitHub repo, add three **Actions secrets** — *Settings → Secrets and variables → Actions → New repository secret*:
+
+   | Secret name | What it holds |
+   |-------------|----------------|
+   | `EMAIL_USER` | the Gmail address that sends the report |
+   | `EMAIL_PASSWORD` | the 16-character Gmail **app password** |
+   | `EMAIL_RECIPIENTS` | comma-separated recipient address(es) |
+
+   > 🔒 **Keep these in GitHub Actions secrets only.** Never commit real credentials to the code, the README, or a tracked `.env`. (`.env` is git-ignored.)
+
+### Run it manually
+
+- **Web:** repo → **Actions** → *Daily NSE Summary Email* → **Run workflow** → branch `main` → **Run**.
+- **CLI:** `gh workflow run "Daily NSE Summary Email"` then `gh run watch`.
+
+### Run / test locally
+
+Put `EMAIL_USER`, `EMAIL_PASSWORD`, and `EMAIL_RECIPIENTS` in your **local `.env`** (git-ignored), then:
+
+```bash
+ENABLE_EMAIL_NOTIFICATIONS=true python send_summary.py --force-refresh
+```
+
+With email disabled it just builds `reports/nse_summary_*.pdf` without sending.
+
+> **Notes:** GitHub's scheduler can start a few minutes late — harmless for a daily digest. Running at 10 pm means the market is closed, so prices reflect the settled daily close. Check your spam folder for the first email and mark it "not spam".
+
 ## Project Structure
 
 ```
 kenyan_stock_analyzer/
 ├── main.py                     # Entry point — orchestrates the full pipeline
+├── send_summary.py             # Builds the 1-page PDF summary and emails it (daily job)
 ├── run.sh                      # One-command runner (venv + pipeline + open dashboard)
 ├── scheduler.py                # Optional scheduler for automated daily runs
+├── .github/workflows/          # GitHub Actions — daily-summary.yml (scheduled email)
 ├── requirements.txt            # Python dependencies
 ├── .env.example                # Example environment configuration
 ├── crontab.example             # Cron setup reference
@@ -103,7 +152,11 @@ kenyan_stock_analyzer/
 │   ├── data_acquisition.py     # Fetches OHLCV data from TradingView, NSE PDF, Yahoo
 │   ├── analysis_engine.py      # Technical analysis (RSI, MACD, Bollinger, etc.)
 │   ├── fundamental_analysis.py # Fundamental data from TradingView scanner
-│   ├── report_generator.py     # HTML/PDF reports, Excel export, charts
+│   ├── price_validation.py     # Cross-checks prices vs an independent source + freshness
+│   ├── market_context.py       # USD/KES rate + per-sector median valuation
+│   ├── scoring.py              # Transparent 0-100 factor score + per-stock alerts
+│   ├── history_tracker.py      # Appends a daily snapshot for later accuracy review
+│   ├── report_generator.py     # HTML/PDF reports, Excel export, charts, summary PDF
 │   ├── sector_analysis.py      # Sector-level aggregation
 │   ├── config.py               # Centralized configuration from .env
 │   ├── logger.py               # Logging setup
