@@ -1,0 +1,53 @@
+name: Daily NSE Summary Email
+
+# Runs on GitHub's cloud — independent of any laptop.
+on:
+  schedule:
+    # 19:00 UTC = 22:00 EAT (10:00 pm Kenya), Monday–Friday.
+    # Note: GitHub cron is UTC and may start a few minutes late under load.
+    - cron: '0 19 * * 1-5'
+  workflow_dispatch: {}   # allows manual "Run workflow" from the Actions tab
+
+jobs:
+  summary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install system libraries for WeasyPrint (PDF)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libpango-1.0-0 libpangocairo-1.0-0 \
+            libgdk-pixbuf-2.0-0 libcairo2 libffi-dev libjpeg-dev
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build and email the daily summary
+        env:
+          ENABLE_EMAIL_NOTIFICATIONS: 'true'
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          EMAIL_RECIPIENTS: ${{ secrets.EMAIL_RECIPIENTS }}
+          SMTP_HOST: smtp.gmail.com
+          SMTP_PORT: '587'
+        run: python send_summary.py --force-refresh
+
+      - name: Upload summary as a build artifact (backup copy)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nse-summary
+          path: reports/nse_summary_*.pdf
+          if-no-files-found: ignore
+          retention-days: 14
