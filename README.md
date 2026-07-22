@@ -1,6 +1,8 @@
 # 🇰🇪 Kenyan Stock Analyzer — NSE Daily Dashboard
 
-A fully automated daily stock analysis pipeline for the **Nairobi Securities Exchange (NSE)**. Fetches data from **TradingView** (100% accurate, no guesses), performs technical and fundamental analysis on all 57+ listed stocks, and generates an interactive HTML dashboard with individual stock reports.
+A fully automated daily stock analysis pipeline for the **Nairobi Securities Exchange (NSE)**. Displays the **NSE official closing price** for each stock (settled after market close), cross-checked against **TradingView**, and uses TradingView for fundamentals and price history. Performs technical and fundamental analysis on all 57+ listed stocks and generates an interactive HTML dashboard with individual stock reports.
+
+> **Accuracy note:** prices shown are the official NSE close from an independent NSE data service, cross-checked against TradingView; where the two disagree (usually thinly-traded stocks) the price is flagged ❗ so you know to confirm it. No free feed is guaranteed accurate to the shilling intraday — for the most reliable numbers, run **after market close (15:00 EAT)**.
 
 ## Features
 
@@ -102,7 +104,37 @@ The summary is a subset of the dashboard (the dashboard itself is unchanged) and
 ### How it works
 
 - `send_summary.py` runs a lean pipeline (data → analysis → fundamentals → price validation → scoring), builds the PDF via `ReportGenerator.generate_summary`, and emails it.
-- `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button. Each run also keeps the PDF as a downloadable artifact for 14 days.
+- `.github/workflows/daily-summary.yml` runs `send_summary.py` on **GitHub Actions** at `19:00 UTC` (22:00 EAT), Monday–Friday, plus a manual "Run workflow" button.
+- **Skips non-trading days.** Weekends are excluded by the schedule, and `send_summary.py` also checks the **Kenyan public-holiday calendar** (Christmas, Boxing Day, Jamhuri Day, Madaraka Day, Mashujaa Day, Labour Day, New Year, Easter, Eid, etc. via the `holidays` library) — on those days it sends nothing. Manual runs pass `--ignore-calendar`, so you can still test on any day.
+- **Files never accumulate on GitHub.** Each run happens on a fresh, throwaway machine and starts by clearing any leftovers. The report is committed nowhere (`reports/`, `data/`, `*.pdf`, `*.xlsx` are git-ignored). The only thing kept is a **single backup artifact** (the latest PDF) — and the workflow **deletes the previous one just before generating the new one**, so at most one ever exists. That backup lets you re-download the report if an email ever fails.
+
+### Non-trading days (no email sent)
+
+The NSE does not trade on weekends or Kenyan public holidays, so there is no new data to report on those days. `send_summary.py` checks the date **in Nairobi time** and sends nothing when the market is closed:
+
+- **Weekends** — Saturday & Sunday (scheduled runs are already limited to Mon–Fri, and the code double-checks).
+- **Kenyan public holidays** — resolved automatically via the [`holidays`](https://pypi.org/project/holidays/) library (`holidays.Kenya`):
+
+  | Holiday | Date |
+  |---------|------|
+  | New Year's Day | 1 January |
+  | Good Friday | moves each year (Easter) |
+  | Easter Monday | moves each year (Easter) |
+  | Labour Day | 1 May |
+  | Madaraka Day | 1 June |
+  | Idd-ul-Fitr (Eid al-Fitr) | moves each year (Islamic calendar) |
+  | Idd-ul-Adha (Eid al-Adha) | moves each year (Islamic calendar) |
+  | Utamaduni / Mazingira Day | 10 October |
+  | Mashujaa Day | 20 October |
+  | Jamhuri Day | 12 December |
+  | Christmas Day | 25 December |
+  | Boxing Day | 26 December |
+
+**Works for every year, automatically.** The calendar is computed for the current year at run time — nothing is hard-coded to a single year, and the moving holidays (Easter, Eid) are recalculated correctly each year. Occasional one-off public holidays declared by the government are also picked up as the `holidays` library is updated.
+
+**Manual runs always send.** The "Run workflow" button passes `--ignore-calendar`, so you can test on any day (weekend or holiday). Only the automatic scheduled runs respect the calendar.
+
+**Fails open.** If the holiday check is ever unavailable, the report still runs rather than silently going missing.
 
 ### Setup (one time)
 

@@ -39,16 +39,57 @@ setup_logging(config)
 logger = get_logger(__name__)
 
 
+def market_closed_today():
+    """
+    Return (closed: bool, reason: str|None) for the NSE today, evaluated in
+    Nairobi time. The NSE does not trade on weekends or Kenyan public
+    holidays (New Year, Easter, Labour Day, Madaraka, Mashujaa, Jamhuri,
+    Christmas, Boxing Day, Eid, etc.).
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        today = datetime.now(ZoneInfo("Africa/Nairobi")).date()
+    except Exception:
+        today = datetime.now().date()
+
+    if today.weekday() >= 5:  # 5 = Saturday, 6 = Sunday
+        return True, "weekend"
+
+    try:
+        import holidays
+        ke = holidays.Kenya(years=today.year)
+        if today in ke:
+            return True, ke.get(today)
+    except Exception as e:
+        # If the holiday check is unavailable, don't block the report.
+        logger.warning(f"Holiday check unavailable ({e}); proceeding anyway.")
+
+    return False, None
+
+
 def main():
     logger.info("=" * 60)
     logger.info(f"NSE DAILY SUMMARY EMAIL — {datetime.now():%Y-%m-%d %H:%M}")
     logger.info("=" * 60)
 
+    # Skip weekends and Kenyan public holidays (NSE is closed — no new data).
+    # Pass --ignore-calendar to force a run anyway (e.g. manual testing).
+    if '--ignore-calendar' not in sys.argv:
+        closed, reason = market_closed_today()
+        if closed:
+            logger.info(f"NSE is closed today ({reason}) — skipping summary email.")
+            print(f"Skipped: NSE closed today ({reason}). No email sent.")
+            return
+
     force = '--force-refresh' in sys.argv
 
     data_acq = DataAcquisition(data_sources=config.data_sources, cache_dir=config.cache_dir)
     engine = AnalysisEngine(config=config)
-    report_gen = ReportGenerator(template_dir=config.template_dir, output_dir=config.report_directory)
+    # clean_old=False so building the summary does not wipe an existing
+    # dashboard in the same reports folder (matters only on a shared machine;
+    # on the GitHub runner the folder is already cleared each run).
+    report_gen = ReportGenerator(template_dir=config.template_dir,
+                                 output_dir=config.report_directory, clean_old=False)
 
     # ---- Data + analysis ----
     logger.info("Fetching stock data...")
@@ -57,26 +98,30 @@ def main():
         logger.error("No stock data — aborting summary")
         sys.exit(1)
     analysis_results = engine.analyze_multiple_stocks(stock_data)
+
+    # ---- Anchor prices to the NSE official close + cross-check ----
+    validations = {}
+    if config.enable_price_validation or config.enable_official_close:
+        try:
+            from price_validation import PriceValidator, apply_official_close
+            pv = PriceValidator(cache_dir=config.cache_dir,
+                                disagree_threshold_pct=config.price_disagree_threshold_pct)
+            reference = pv.fetch_reference_prices()
+            if config.enable_price_validation:
+                for sym, r in analysis_results.items():
+                    if r:
+                        validations[sym] = pv.validate(sym, r.get('latest', {}).get('close'), stock_data.get(sym))
+            if config.enable_official_close:
+                apply_official_close(analysis_results, reference, logger)
+        except Exception as e:
+            logger.warning(f"Official-close/validation skipped: {e}")
+
     breadth = engine.calculate_market_breadth(analysis_results)
     sector_data = SectorAnalyzer().analyze_sectors(stock_data, analysis_results)
 
     # ---- Fundamentals ----
     fund_analyzer = FundamentalAnalysis(cache_dir=config.cache_dir)
     fundamentals_data = fund_analyzer.fetch_all_fundamentals(force_refresh=force)
-
-    # ---- Price validation ----
-    validations = {}
-    if config.enable_price_validation:
-        try:
-            from price_validation import PriceValidator
-            pv = PriceValidator(cache_dir=config.cache_dir,
-                                disagree_threshold_pct=config.price_disagree_threshold_pct)
-            pv.fetch_reference_prices()
-            for sym, r in analysis_results.items():
-                if r:
-                    validations[sym] = pv.validate(sym, r.get('latest', {}).get('close'), stock_data.get(sym))
-        except Exception as e:
-            logger.warning(f"Price validation skipped: {e}")
 
     # ---- Context, scoring, alerts ----
     usd_kes = None

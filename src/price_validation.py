@@ -134,7 +134,14 @@ class PriceValidator:
                 price = float(cells[3].replace(",", ""))
             except (ValueError, IndexError):
                 continue
-            out[ticker] = {"price": price, "volume": volume}
+            # The last cell is the day's absolute price change (may be +/-).
+            change = None
+            if len(cells) > 4:
+                try:
+                    change = float(cells[4].replace(",", "").replace("+", ""))
+                except ValueError:
+                    change = None
+            out[ticker] = {"price": price, "volume": volume, "change": change}
         return out
 
     # ---- Validation ----
@@ -192,8 +199,9 @@ class PriceValidator:
         elif agree is False:
             status = "mismatch"
             note = (
-                f"Differs from {REFERENCE_SOURCE} by {pct_diff:+.1f}% "
-                f"({reference_price:g} vs {dashboard_price:g})"
+                f"TradingView ({dashboard_price:g}) differs from the NSE "
+                f"official close ({reference_price:g}) by {pct_diff:+.1f}% "
+                f"— price uncertain"
             )
         elif is_stale:
             status = "stale"
@@ -213,6 +221,44 @@ class PriceValidator:
             "status": status,
             "note": note,
         }
+
+
+def apply_official_close(analysis_results, reference, logger=None):
+    """
+    Anchor each stock's DISPLAYED price and daily change to the NSE official
+    closing price (from the reference board), which after market close is a
+    stable, settled value — unlike TradingView's ~15-min-delayed feed.
+
+    - Sets latest['close'] to the official close.
+    - Recomputes daily_change_pct from the official day's change when available.
+    - Keeps the original TradingView close as latest['tv_close'] so the two can
+      still be cross-checked, and tags latest['price_source'].
+
+    Fails safe per stock: if there is no official price, the TradingView value
+    is left untouched. Returns the number of stocks anchored.
+    """
+    anchored = 0
+    for sym, result in (analysis_results or {}).items():
+        if not result:
+            continue
+        latest = result.get('latest')
+        if latest is None:
+            continue
+        row = (reference or {}).get(sym.upper())
+        if not row or not row.get('price'):
+            latest['price_source'] = 'TradingView'
+            continue
+        off = row['price']
+        latest['tv_close'] = latest.get('close')
+        latest['close'] = off
+        latest['price_source'] = 'NSE official (afx)'
+        chg = row.get('change')
+        if chg is not None and (off - chg) != 0:
+            result['daily_change_pct'] = chg / (off - chg) * 100.0
+        anchored += 1
+    if logger:
+        logger.info(f"  Anchored {anchored} prices to the NSE official close")
+    return anchored
 
 
 # ---- Test ----

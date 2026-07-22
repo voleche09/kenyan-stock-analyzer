@@ -86,7 +86,7 @@ COLORS = {
 class ReportGenerator:
     """Generates HTML/PDF reports and Excel exports."""
 
-    def __init__(self, template_dir=None, output_dir=None):
+    def __init__(self, template_dir=None, output_dir=None, clean_old=True):
         if template_dir is None:
             template_dir = os.path.join(
                 os.path.dirname(__file__), '..', 'templates'
@@ -102,8 +102,11 @@ class ReportGenerator:
         os.makedirs(self.template_dir, exist_ok=True)
         os.makedirs(self.output_dir, exist_ok=True)
 
-        # Clean old reports from previous runs (keep directory, just clear files)
-        self._clean_old_reports()
+        # Clean old reports from previous runs (keep directory, just clear
+        # files). Skipped when clean_old=False so a summary-only run does not
+        # wipe an existing dashboard sitting in the same folder.
+        if clean_old:
+            self._clean_old_reports()
 
         self.env = Environment(loader=FileSystemLoader(self.template_dir))
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -1208,8 +1211,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                     f"{m['symbol']} ({(m.get('validation') or {}).get('pct_diff'):+.1f}%)"
                     for m in mismatch_list
                 )
-                mismatch_note = (f'<div class="dq-note dq-mismatch">⚠️ Price differs from '
-                                 f'independent source for: {items}</div>')
+                mismatch_note = (f'<div class="dq-note dq-mismatch">⚠️ TradingView differs from '
+                                 f'the NSE official close for: {items}</div>')
             dq_html = f'''
 <div class="section">
     <h2>✅ Data Quality</h2>
@@ -1219,8 +1222,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
         <div class="stat-card"><div class="stat-value neutral">{v_stale}</div><div class="stat-label">Stale / thin</div></div>
         <div class="stat-card"><div class="stat-value">{v_unverified}</div><div class="stat-label">Unverified</div></div>
     </div>
-    <div class="dq-note">Prices cross-checked against an independent NSE source (afx.kwayisi.org).
-    ✓ = matches within threshold · ❗ = differs · 🕒 = last traded &gt;1 day ago. TradingView data is ~15&nbsp;min delayed.</div>
+    <div class="dq-note">Prices shown are the <strong>NSE official close</strong> (afx.kwayisi.org), cross-checked against TradingView.
+    ✓ = TradingView confirms it · ❗ = TradingView differs (price uncertain) · 🕒 = last traded &gt;1 day ago.</div>
     {mismatch_note}
 </div>'''
 
@@ -1408,7 +1411,7 @@ tr:hover {{ background: #f8fafc; }}
 
 <div class="header">
     <h1>🇰🇪 NSE Daily Dashboard</h1>
-    <div class="date">{now} · {total} stocks analyzed · 📅 Financial data: {data_date_str} · Source: TradingView{fx_html}</div>
+    <div class="date">{now} · {total} stocks analyzed · 📅 Financial data: {data_date_str} · Prices: NSE official close · Fundamentals: TradingView{fx_html}</div>
 </div>
 
 <!-- Market Stats -->

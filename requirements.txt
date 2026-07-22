@@ -29,6 +29,7 @@ rich>=15.0.0
 
 # Scheduling
 schedule>=1.2.0
+holidays>=0.50   # Kenyan public-holiday calendar (skip non-trading days)
 
 # Scientific
 scipy>=1.14.0
