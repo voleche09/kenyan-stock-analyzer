@@ -85,7 +85,11 @@ def main():
 
     data_acq = DataAcquisition(data_sources=config.data_sources, cache_dir=config.cache_dir)
     engine = AnalysisEngine(config=config)
-    report_gen = ReportGenerator(template_dir=config.template_dir, output_dir=config.report_directory)
+    # clean_old=False so building the summary does not wipe an existing
+    # dashboard in the same reports folder (matters only on a shared machine;
+    # on the GitHub runner the folder is already cleared each run).
+    report_gen = ReportGenerator(template_dir=config.template_dir,
+                                 output_dir=config.report_directory, clean_old=False)
 
     # ---- Data + analysis ----
     logger.info("Fetching stock data...")
@@ -94,26 +98,30 @@ def main():
         logger.error("No stock data — aborting summary")
         sys.exit(1)
     analysis_results = engine.analyze_multiple_stocks(stock_data)
+
+    # ---- Anchor prices to the NSE official close + cross-check ----
+    validations = {}
+    if config.enable_price_validation or config.enable_official_close:
+        try:
+            from price_validation import PriceValidator, apply_official_close
+            pv = PriceValidator(cache_dir=config.cache_dir,
+                                disagree_threshold_pct=config.price_disagree_threshold_pct)
+            reference = pv.fetch_reference_prices()
+            if config.enable_price_validation:
+                for sym, r in analysis_results.items():
+                    if r:
+                        validations[sym] = pv.validate(sym, r.get('latest', {}).get('close'), stock_data.get(sym))
+            if config.enable_official_close:
+                apply_official_close(analysis_results, reference, logger)
+        except Exception as e:
+            logger.warning(f"Official-close/validation skipped: {e}")
+
     breadth = engine.calculate_market_breadth(analysis_results)
     sector_data = SectorAnalyzer().analyze_sectors(stock_data, analysis_results)
 
     # ---- Fundamentals ----
     fund_analyzer = FundamentalAnalysis(cache_dir=config.cache_dir)
     fundamentals_data = fund_analyzer.fetch_all_fundamentals(force_refresh=force)
-
-    # ---- Price validation ----
-    validations = {}
-    if config.enable_price_validation:
-        try:
-            from price_validation import PriceValidator
-            pv = PriceValidator(cache_dir=config.cache_dir,
-                                disagree_threshold_pct=config.price_disagree_threshold_pct)
-            pv.fetch_reference_prices()
-            for sym, r in analysis_results.items():
-                if r:
-                    validations[sym] = pv.validate(sym, r.get('latest', {}).get('close'), stock_data.get(sym))
-        except Exception as e:
-            logger.warning(f"Price validation skipped: {e}")
 
     # ---- Context, scoring, alerts ----
     usd_kes = None

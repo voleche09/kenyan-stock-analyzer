@@ -118,6 +118,35 @@ def main():
         # ---- Analyze ----
         logger.info("Analyzing...")
         analysis_results = analysis_engine.analyze_multiple_stocks(stock_data)
+
+        # ---- Anchor prices to the NSE official close + cross-check ----
+        # Displayed prices/changes use the official settled close (stable after
+        # market close); TradingView is kept only as a cross-check. Done before
+        # sector/breadth so those use the official figures too.
+        validations = {}
+        if config.enable_price_validation or config.enable_official_close:
+            try:
+                from price_validation import PriceValidator, apply_official_close
+                pv = PriceValidator(
+                    cache_dir=config.cache_dir,
+                    disagree_threshold_pct=config.price_disagree_threshold_pct,
+                )
+                reference = pv.fetch_reference_prices()
+                if config.enable_price_validation:
+                    logger.info("Cross-checking TradingView vs NSE official close...")
+                    for symbol, result in analysis_results.items():
+                        if not result:
+                            continue
+                        price = result.get('latest', {}).get('close')
+                        validations[symbol] = pv.validate(symbol, price, stock_data.get(symbol))
+                    n_ok = sum(1 for v in validations.values() if v['status'] == 'ok')
+                    n_mis = sum(1 for v in validations.values() if v['status'] == 'mismatch')
+                    logger.info(f"  Cross-check: {n_ok} confirmed, {n_mis} differ")
+                if config.enable_official_close:
+                    apply_official_close(analysis_results, reference, logger)
+            except Exception as e:
+                logger.warning(f"Official-close/validation skipped: {e}")
+
         sector_data = sector_analyzer.analyze_sectors(stock_data, analysis_results)
         breadth = analysis_engine.calculate_market_breadth(analysis_results)
 
@@ -128,29 +157,6 @@ def main():
             force_refresh=args.force_refresh
         )
         logger.info(f"Fundamental data loaded for {len(fundamentals_data)} stocks")
-
-        # ---- Price validation (independent source + freshness) ----
-        validations = {}
-        if config.enable_price_validation:
-            logger.info("Validating prices against independent source...")
-            try:
-                from price_validation import PriceValidator
-                pv = PriceValidator(
-                    cache_dir=config.cache_dir,
-                    disagree_threshold_pct=config.price_disagree_threshold_pct,
-                )
-                pv.fetch_reference_prices()
-                for symbol, result in analysis_results.items():
-                    if not result:
-                        continue
-                    price = result.get('latest', {}).get('close')
-                    hist = stock_data.get(symbol)
-                    validations[symbol] = pv.validate(symbol, price, hist)
-                n_mismatch = sum(1 for v in validations.values() if v['status'] == 'mismatch')
-                n_verified = sum(1 for v in validations.values() if v['status'] == 'ok')
-                logger.info(f"  Price validation: {n_verified} verified, {n_mismatch} mismatched")
-            except Exception as e:
-                logger.warning(f"Price validation skipped: {e}")
 
         # ---- Market context: sector medians + USD/KES ----
         sector_medians = {}
