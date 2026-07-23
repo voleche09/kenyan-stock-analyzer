@@ -302,6 +302,12 @@ class ReportGenerator:
             logger.error(f"Invalid analysis result for {symbol}")
             return None
 
+        # Normalise fundamentals so any missing metric resolves to None (not a
+        # Jinja "Undefined") for stocks with no fundamentals — keeps the template
+        # from erroring and falling back to the plain layout.
+        from collections import defaultdict
+        fundamentals = defaultdict(lambda: None, fundamentals or {})
+
         data = analysis_result['data']
         signals = analysis_result.get('signals', {})
         latest = analysis_result.get('latest', {})
@@ -1184,7 +1190,9 @@ tr:hover { background: #f8fafc; }
             return None
         try:
             v = float(value)
-        except (TypeError, ValueError):
+        except Exception:
+            # Covers non-numeric values and Jinja Undefined (stocks with no
+            # fundamentals) — treat as neutral (no colour) rather than error.
             return None
         rules = {
             'pe':    lambda: 'good' if 0 < v <= 15 else 'bad' if (v <= 0 or v > 30) else None,
