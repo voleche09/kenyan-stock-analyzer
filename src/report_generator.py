@@ -1163,6 +1163,7 @@ tr:hover { background: #f8fafc; }
 .explain-card .good { color: #166534; }
 /* Fundamental cell verdicts: green = good, red = bad */
 .fgood { color: #16a34a; font-weight: 700; }
+.fmid { color: #d97706; font-weight: 700; }
 .fbad { color: #dc2626; font-weight: 700; }
 @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>"""
@@ -1205,35 +1206,40 @@ tr:hover { background: #f8fafc; }
             # Covers non-numeric values and Jinja Undefined (stocks with no
             # fundamentals) — treat as neutral (no colour) rather than error.
             return None
+        # Three tiers: 'good' (green), 'bad' (red), 'mid' (amber). A numeric
+        # value that is neither clearly good nor bad is 'mid'. Non-numeric /
+        # missing values returned None above and stay uncoloured (black).
         rules = {
-            'pe':    lambda: 'good' if 0 < v <= 15 else 'bad' if (v <= 0 or v > 30) else None,
-            'peg':   lambda: 'good' if 0 < v <= 1 else 'bad' if (v < 0 or v > 2.5) else None,
-            'pb':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 5) else None,
-            'ps':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 6) else None,
-            'ev_ebitda': lambda: 'good' if 0 < v <= 10 else 'bad' if (v < 0 or v > 20) else None,
-            'eps':   lambda: 'good' if v > 0 else 'bad' if v < 0 else None,
-            'eps_growth': lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
-            'roe':   lambda: 'good' if v >= 15 else 'bad' if v < 5 else None,
-            'roic':  lambda: 'good' if v >= 12 else 'bad' if v < 5 else None,
-            'roa':   lambda: 'good' if v >= 8 else 'bad' if v < 2 else None,
-            'gm':    lambda: 'good' if v >= 40 else 'bad' if v < 15 else None,
-            'om':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else None,
-            'nm':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else None,
-            'fcfm':  lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
-            'de':    lambda: 'good' if 0 <= v <= 0.5 else 'bad' if (v < 0 or v > 2) else None,
-            'cr':    lambda: 'good' if v >= 1.5 else 'bad' if v < 1 else None,
-            'qr':    lambda: 'good' if v >= 1 else 'bad' if v < 0.7 else None,
-            'rg':    lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
-            'yield': lambda: 'good' if v >= 5 else None,
+            'pe':    lambda: 'good' if 0 < v <= 15 else 'bad' if (v <= 0 or v > 30) else 'mid',
+            'peg':   lambda: 'good' if 0 < v <= 1 else 'bad' if (v < 0 or v > 2.5) else 'mid',
+            'pb':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 5) else 'mid',
+            'ps':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 6) else 'mid',
+            'ev_ebitda': lambda: 'good' if 0 < v <= 10 else 'bad' if (v < 0 or v > 20) else 'mid',
+            'eps':   lambda: 'good' if v > 0 else 'bad' if v < 0 else 'mid',
+            'eps_growth': lambda: 'good' if v >= 10 else 'bad' if v < 0 else 'mid',
+            'roe':   lambda: 'good' if v >= 15 else 'bad' if v < 5 else 'mid',
+            'roic':  lambda: 'good' if v >= 12 else 'bad' if v < 5 else 'mid',
+            'roa':   lambda: 'good' if v >= 8 else 'bad' if v < 2 else 'mid',
+            'gm':    lambda: 'good' if v >= 40 else 'bad' if v < 15 else 'mid',
+            'om':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else 'mid',
+            'nm':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else 'mid',
+            'fcfm':  lambda: 'good' if v >= 10 else 'bad' if v < 0 else 'mid',
+            'de':    lambda: 'good' if 0 <= v <= 0.5 else 'bad' if (v < 0 or v > 2) else 'mid',
+            'cr':    lambda: 'good' if v >= 1.5 else 'bad' if v < 1 else 'mid',
+            'qr':    lambda: 'good' if v >= 1 else 'bad' if v < 0.7 else 'mid',
+            'rg':    lambda: 'good' if v >= 10 else 'bad' if v < 0 else 'mid',
+            'yield': lambda: 'good' if v >= 5 else 'mid',
         }
         fn = rules.get(metric)
         return fn() if fn else None
 
     @staticmethod
     def _fund_color(metric, value):
-        """Return 'positive'/'negative'/'' (green/red/neutral) for templates."""
+        """Return a colour class for templates: green / amber / red / none.
+        good→'positive' (green), mid→'midv' (amber), bad→'negative' (red),
+        None (N/A)→'' (black)."""
         verdict = ReportGenerator._fund_verdict(metric, value)
-        return 'positive' if verdict == 'good' else 'negative' if verdict == 'bad' else ''
+        return {'good': 'positive', 'mid': 'midv', 'bad': 'negative'}.get(verdict, '')
 
     def _fundamentals_explainer(self):
         """Plain-English guide to each fundamental metric, for non-experts."""
@@ -1410,7 +1416,7 @@ tr:hover { background: #f8fafc; }
         # ---- FUNDAMENTALS page ----
         def fcls(metric, raw):
             v = self._fund_verdict(metric, raw)
-            return 'fgood' if v == 'good' else 'fbad' if v == 'bad' else ''
+            return {'good': 'fgood', 'mid': 'fmid', 'bad': 'fbad'}.get(v, '')
 
         fund_rows = ''
         for s in stocks:
@@ -1438,8 +1444,8 @@ tr:hover { background: #f8fafc; }
                 f'<td class="{fcls("yield", s.get("dividend_yield"))}">{dy}</td>{score_td(s)}</tr>')
         fundamentals_body = (
             '<p class="page-intro">Valuation, quality, growth &amp; health metrics (from TradingView). '
-            '<span class="fgood">Green = good</span>, <span class="fbad">red = weak/risky</span>, '
-            'plain = average. New to these? The plain-English guide with examples is right below the table.</p>'
+            '<span class="fgood">Green = good</span>, <span class="fmid">amber = average</span>, '
+            '<span class="fbad">red = weak/risky</span>, black = no data. New to these? The plain-English guide with examples is right below the table.</p>'
             '<div class="section"><h2>💰 Fundamentals</h2>' + search_bar +
             '<div class="table-wrap"><table id="mainTable"><thead><tr>'
             '<th>Symbol</th><th>Price</th><th>Market Cap</th><th title="Price / Earnings">P/E</th>'

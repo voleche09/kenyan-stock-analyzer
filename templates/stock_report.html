@@ -179,8 +179,9 @@
         </div>
     </div>
     <p style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">
-        <span class="positive" style="font-weight:700;">Green</span> = healthy value ·
-        <span class="negative" style="font-weight:700;">Red</span> = weak/risky value · plain = average. See the guide below for what each means.
+        <span class="positive" style="font-weight:700;">Green</span> = good ·
+        <span class="midv" style="font-weight:700;">Amber</span> = average ·
+        <span class="negative" style="font-weight:700;">Red</span> = weak/risky · black = no data. See the guide below for what each means.
     </p>
 
     <!-- Plain English Explanations -->
@@ -460,6 +461,76 @@
 </div>
 
 <!-- ============================================================ -->
+<!-- TECHNICAL INDICATORS -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>📈 Technical Indicators</h2>
+    <div class="signals-grid">
+        {% for name in ['trend', 'ma_crossover', 'macd', 'rsi', 'bollinger', 'stochastic', 'volume'] %}
+        {% if name in signals %}
+        <span class="signal {{ signals[name] }}">{{ name|replace('_', ' ')|title }}: {{ signals[name]|replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Key Metrics -->
+<div class="card">
+    <h2>📐 Technical Values</h2>
+    <div class="metrics-grid">
+        {% for key, label in [
+            ('close', 'Close Price'), ('sma_20', 'SMA 20'), ('sma_50', 'SMA 50'),
+            ('ema_12', 'EMA 12'), ('ema_26', 'EMA 26'), ('rsi', 'RSI (14)'),
+            ('atr', 'ATR (14)'), ('macd', 'MACD'), ('macd_signal', 'MACD Signal'),
+            ('macd_hist', 'MACD Histogram'), ('stoch_k', 'Stochastic %K'),
+            ('stoch_d', 'Stochastic %D'), ('volume', 'Volume')
+        ] %}
+        {% if latest.get(key) is not none %}
+        <div class="metric">
+            <div class="label">{{ label }}</div>
+            <div class="value">{{ "%.2f"|format(latest[key]) }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Charts -->
+{% for chart in charts %}
+<div class="card">
+    <h2>{{ chart.title }}</h2>
+    <div class="chart-container">
+        <img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}">
+    </div>
+</div>
+{% endfor %}
+
+<!-- Support / Resistance -->
+{% if supports or resistances %}
+<div class="card">
+    <h2>Support &amp; Resistance Levels</h2>
+    <div class="levels-row">
+        {% if supports %}
+        <div class="level-box">
+            <h3>🟢 Support Levels (floor)</h3>
+            {% for level in supports[:5] %}
+            <span class="level-badge support">{{ "%.2f"|format(level) }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% if resistances %}
+        <div class="level-box">
+            <h3>🔴 Resistance Levels (ceiling)</h3>
+            {% for level in resistances[:5] %}
+            <span class="level-badge resistance">{{ "%.2f"|format(level) }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- ============================================================ -->
 <!-- SIMILAR STOCKS -->
 <!-- ============================================================ -->
 {% if similar_stocks %}
@@ -531,76 +602,6 @@
                 {% endfor %}
             </tbody>
         </table>
-    </div>
-</div>
-{% endif %}
-
-<!-- ============================================================ -->
-<!-- TECHNICAL INDICATORS -->
-<!-- ============================================================ -->
-<div class="card">
-    <h2>📈 Technical Indicators</h2>
-    <div class="signals-grid">
-        {% for name in ['trend', 'ma_crossover', 'macd', 'rsi', 'bollinger', 'stochastic', 'volume'] %}
-        {% if name in signals %}
-        <span class="signal {{ signals[name] }}">{{ name|replace('_', ' ')|title }}: {{ signals[name]|replace('_', ' ')|title }}</span>
-        {% endif %}
-        {% endfor %}
-    </div>
-</div>
-
-<!-- Key Metrics -->
-<div class="card">
-    <h2>📐 Technical Values</h2>
-    <div class="metrics-grid">
-        {% for key, label in [
-            ('close', 'Close Price'), ('sma_20', 'SMA 20'), ('sma_50', 'SMA 50'),
-            ('ema_12', 'EMA 12'), ('ema_26', 'EMA 26'), ('rsi', 'RSI (14)'),
-            ('atr', 'ATR (14)'), ('macd', 'MACD'), ('macd_signal', 'MACD Signal'),
-            ('macd_hist', 'MACD Histogram'), ('stoch_k', 'Stochastic %K'),
-            ('stoch_d', 'Stochastic %D'), ('volume', 'Volume')
-        ] %}
-        {% if latest.get(key) is not none %}
-        <div class="metric">
-            <div class="label">{{ label }}</div>
-            <div class="value">{{ "%.2f"|format(latest[key]) }}</div>
-        </div>
-        {% endif %}
-        {% endfor %}
-    </div>
-</div>
-
-<!-- Charts -->
-{% for chart in charts %}
-<div class="card">
-    <h2>{{ chart.title }}</h2>
-    <div class="chart-container">
-        <img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}">
-    </div>
-</div>
-{% endfor %}
-
-<!-- Support / Resistance -->
-{% if supports or resistances %}
-<div class="card">
-    <h2>Support &amp; Resistance Levels</h2>
-    <div class="levels-row">
-        {% if supports %}
-        <div class="level-box">
-            <h3>🟢 Support Levels (floor)</h3>
-            {% for level in supports[:5] %}
-            <span class="level-badge support">{{ "%.2f"|format(level) }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
-        {% if resistances %}
-        <div class="level-box">
-            <h3>🔴 Resistance Levels (ceiling)</h3>
-            {% for level in resistances[:5] %}
-            <span class="level-badge resistance">{{ "%.2f"|format(level) }}</span>
-            {% endfor %}
-        </div>
-        {% endif %}
     </div>
 </div>
 {% endif %}
@@ -705,6 +706,7 @@
        never actually showed.) */
     .positive { color: #16a34a; font-weight: 700; }
     .negative { color: #dc2626; font-weight: 700; }
+    .midv { color: #d97706; font-weight: 700; }  /* amber = middle */
     /* Glossary table — allow the explanation text to wrap */
     .glossary td { white-space: normal; vertical-align: top; font-size: 0.85rem; line-height: 1.5; }
     .glossary td:first-child { white-space: nowrap; font-weight: 600; }
