@@ -978,6 +978,12 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                 'roe': fund.get('roe'),
                 'peg_ratio': fund.get('peg_ratio'),
                 'sector': fund.get('sector', ''),
+                # Extra fundamentals (from TradingView) for the layman detail table
+                'price_to_book': fund.get('price_to_book'),
+                'eps': fund.get('eps_ttm'),
+                'net_margin': fund.get('net_margin'),
+                'debt_to_equity': fund.get('debt_to_equity'),
+                'revenue_growth': fund.get('revenue_growth_yoy'),
                 # TradingView Buy/Sell signal
                 'signal_label': rating_label,
                 'signal_class': rating_class,
@@ -1130,6 +1136,13 @@ tr:hover { background: #f8fafc; }
 .filter-bar { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
 .filter-bar input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; width: 220px; }
 .footer { text-align: center; padding: 20px; color: #94a3b8; font-size: 0.8rem; }
+/* Plain-English explainer cards */
+.explain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 6px; }
+.explain-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 14px 16px; }
+.explain-card h4 { font-size: 0.95rem; margin-bottom: 6px; color: #1e293b; }
+.explain-card p { font-size: 0.84rem; color: #475569; line-height: 1.5; margin: 5px 0; }
+.explain-card .eg { color: #0f766e; }
+.explain-card .good { color: #166534; }
 @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>"""
 
@@ -1155,6 +1168,61 @@ tr:hover { background: #f8fafc; }
             'Click any stock symbol for its full individual report</div>'
             '</div>' + js + '</body></html>'
         )
+
+    def _fundamentals_explainer(self):
+        """Plain-English guide to each fundamental metric, for non-experts."""
+        cards = [
+            ("P/E — Price to Earnings",
+             "How many shillings you pay for each 1 shilling of yearly profit.",
+             "P/E of 10 → you pay KES 10 for every KES 1 the company earns a year (about 10 years of profit to earn back the price).",
+             "Under 10 = cheap (or troubled); 10–20 = fair; over 25 = expensive (fast growth expected). Always compare within the same sector."),
+            ("PEG — P/E adjusted for growth",
+             "A high P/E is fine if profits grow fast. PEG divides the P/E by the growth rate to check that.",
+             "P/E of 20 but profits growing 20%/yr → PEG = 1.0 (fairly priced).",
+             "Under 1.0 = attractively priced for its growth; around 1 = fair; over 2 = pricey."),
+            ("P/B — Price to Book",
+             "Price versus the company's net worth on paper (assets minus debts) per share.",
+             "P/B of 1 = you pay exactly the company's book value; 2 = twice that.",
+             "Under 1 can be cheap (common for NSE banks); 1–3 is typical; high = paying a premium for brand/growth."),
+            ("EPS — Earnings Per Share",
+             "The company's yearly profit split across each share — the profit that 'belongs' to one share.",
+             "EPS of KES 5 → each share earned 5 shillings this year. It's the 'E' in P/E.",
+             "Higher and rising year on year is better. Negative EPS = the company is losing money."),
+            ("ROE — Return on Equity",
+             "How much profit the company squeezes out of shareholders' money.",
+             "ROE of 20% → for every KES 100 of shareholder money, it makes KES 20 profit a year.",
+             "15–20% = good; above 20% = excellent (check it's sustainable); below 10% = weak."),
+            ("Net Margin",
+             "Out of every 100 shillings of sales, how many shillings become actual profit after ALL costs and taxes.",
+             "Net margin of 25% → KES 25 profit from every KES 100 of sales.",
+             "10%+ = solid; 20%+ = strong. It varies a lot by industry, so compare like with like."),
+            ("D/E — Debt to Equity",
+             "How much the company has borrowed versus what shareholders own — its debt load and risk.",
+             "D/E of 1.0 → debt equals shareholder equity; 0.3 → very little debt.",
+             "Under 0.5 = conservative/safe; 0.5–1.5 = moderate; over 2 = risky. Banks naturally run higher."),
+            ("Rev Growth — Revenue Growth",
+             "How much total sales grew compared with a year ago — is the business getting bigger?",
+             "+15% → sales are 15% higher than last year; a red −5% → sales shrank.",
+             "10%+ = healthy; flat is okay for a mature company; negative is a warning sign."),
+            ("Yield — Dividend Yield",
+             "The yearly dividend as a percentage of the share price — your income return just for holding it.",
+             "Yield of 6% → KES 6 a year for every KES 100 invested.",
+             "4–8% is attractive on the NSE — but confirm it's sustainable (see the Dividends page)."),
+            ("Score (0–100)",
+             "Our own transparent screen that blends value, quality, momentum, dividend and liquidity into one number.",
+             "85 = strong across the board; 40 = weak. Higher means stronger on these factors overall.",
+             "A quick way to compare stocks at a glance — it is a mechanical guide, NOT a recommendation to buy or sell."),
+        ]
+        items = ''
+        for title, what, eg, good in cards:
+            items += (f'<div class="explain-card"><h4>{title}</h4>'
+                      f'<p>{what}</p>'
+                      f'<p class="eg">📌 <strong>Example:</strong> {eg}</p>'
+                      f'<p class="good">✅ <strong>What\'s good:</strong> {good}</p></div>')
+        return ('<div class="section"><h2>📖 What these numbers mean (plain English)</h2>'
+                '<p class="page-intro">No accounting needed — here is each column explained simply, '
+                'with an example and what counts as a good value.</p>'
+                f'<div class="explain-grid">{items}</div></div>')
 
     def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
                                sector_chart, bullish, bearish, neutral, total,
@@ -1278,19 +1346,32 @@ tr:hover { background: #f8fafc; }
         for s in stocks:
             pe = f"{s['pe_ratio']:.1f}" if s['pe_ratio'] else '—'
             peg = f"{s['peg_ratio']:.2f}" if s.get('peg_ratio') else '—'
+            pb = f"{s['price_to_book']:.2f}" if s.get('price_to_book') else '—'
+            eps = f"{s['eps']:.2f}" if s.get('eps') is not None else '—'
             mcap = self._fmt_mcap(s['market_cap']) if s.get('market_cap') else '—'
             roe = f"{s['roe']:.1f}%" if s.get('roe') is not None else '—'
+            nm = f"{s['net_margin']:.1f}%" if s.get('net_margin') is not None else '—'
+            de = f"{s['debt_to_equity']:.2f}" if s.get('debt_to_equity') is not None else '—'
+            rg = s.get('revenue_growth')
+            rg_str = (f'<span class="{"positive" if rg >= 0 else "negative"}">{rg:+.1f}%</span>'
+                      if rg is not None else '—')
             dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
             fund_rows += (
-                f'<tr>{sym_td(s)}<td>{price_cell(s)}</td><td>{pe}</td><td>{peg}</td>'
-                f'<td class="mcap-cell">{mcap}</td><td>{roe}</td><td>{dy}</td>{score_td(s)}</tr>')
+                f'<tr>{sym_td(s)}<td>{price_cell(s)}</td><td class="mcap-cell">{mcap}</td>'
+                f'<td>{pe}</td><td>{peg}</td><td>{pb}</td><td>{eps}</td>'
+                f'<td>{roe}</td><td>{nm}</td><td>{de}</td><td>{rg_str}</td><td>{dy}</td>{score_td(s)}</tr>')
         fundamentals_body = (
-            '<p class="page-intro">Valuation &amp; quality metrics from TradingView. Lower P/E and PEG are cheaper; higher ROE is better.</p>'
-            '<div class="section"><h2>💰 Valuation &amp; Quality</h2>' + search_bar +
+            '<p class="page-intro">Valuation, quality, growth &amp; health metrics (from TradingView). '
+            'New to these? The plain-English guide with examples is right below the table.</p>'
+            '<div class="section"><h2>💰 Fundamentals</h2>' + search_bar +
             '<div class="table-wrap"><table id="mainTable"><thead><tr>'
-            '<th>Symbol</th><th>Price</th><th>P/E</th><th>PEG</th><th>Market Cap</th>'
-            '<th>ROE</th><th>Yield</th><th>Score</th>'
-            f'</tr></thead><tbody>{fund_rows}</tbody></table></div></div>')
+            '<th>Symbol</th><th>Price</th><th>Market Cap</th><th title="Price / Earnings">P/E</th>'
+            '<th title="P/E adjusted for growth">PEG</th><th title="Price / Book value">P/B</th>'
+            '<th title="Earnings per share">EPS</th><th title="Return on Equity">ROE</th>'
+            '<th title="Net profit margin">Net Margin</th><th title="Debt / Equity">D/E</th>'
+            '<th title="Revenue growth vs last year">Rev Growth</th><th>Yield</th><th>Score</th>'
+            f'</tr></thead><tbody>{fund_rows}</tbody></table></div></div>'
+            + self._fundamentals_explainer())
 
         # ---- DIVIDENDS page (calendar + table) ----
         today = datetime.now().date()
