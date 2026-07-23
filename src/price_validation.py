@@ -63,29 +63,22 @@ class PriceValidator:
 
     def fetch_reference_prices(self, force_refresh=False):
         """
-        Fetch the independent NSE price board. Cached per day.
+        Fetch the independent NSE price board.
+
+        Always fetched fresh once per run (a single cheap HTTP request), then
+        held in memory for the rest of the run. We deliberately do NOT reuse a
+        same-day disk cache: NSE prices settle after the close, so an earlier
+        intraday snapshot would be stale — every run must reflect the current
+        official price.
 
         Returns:
-            dict: {ticker: {'price': float, 'volume': int}}, or {} on failure.
+            dict: {ticker: {'price': float, 'volume': int, 'change': float}},
+            or {} on failure.
         """
         if self._reference is not None:
             return self._reference
 
-        # Try disk cache first
         path = self._cache_path()
-        if not force_refresh and os.path.exists(path):
-            try:
-                mtime = datetime.fromtimestamp(os.path.getmtime(path))
-                if mtime.date() == datetime.now().date():
-                    with open(path) as f:
-                        self._reference = json.load(f)
-                    logger.info(
-                        f"Reference prices from cache "
-                        f"({len(self._reference)} stocks)"
-                    )
-                    return self._reference
-            except Exception as e:
-                logger.debug(f"Reference cache read error: {e}")
 
         # Fetch fresh
         try:
