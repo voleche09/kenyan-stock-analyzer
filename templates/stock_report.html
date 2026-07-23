@@ -2,17 +2,6 @@
 {% block title %}{{ symbol }} — Executive Summary & Analysis{% endblock %}
 
 {% block content %}
-<!-- Navigation Bar -->
-<div class="nav-bar">
-    <a href="index.html" class="nav-item">🏠 Overview</a>
-    <a href="technicals.html" class="nav-item">📈 Technicals</a>
-    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
-    <a href="dividends.html" class="nav-item">💵 Dividends</a>
-    <a href="sectors.html" class="nav-item">📊 Sectors</a>
-    <a href="quality.html" class="nav-item">✅ Data Quality</a>
-    <span class="nav-date">📅 {{ data_date }}{% if fundamentals._data_source %} · {{ fundamentals._data_source }}{% endif %}</span>
-</div>
-
 <!-- Header -->
 <div class="header">
     <h1>{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}</h1>
@@ -26,6 +15,17 @@
         </span>
         {% endif %}
     </div>
+</div>
+
+<!-- Navigation Bar (below the header, matching the dashboard pages) -->
+<div class="nav-bar">
+    <a href="index.html" class="nav-item">🏠 Overview</a>
+    <a href="technicals.html" class="nav-item">📈 Technicals</a>
+    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
+    <a href="dividends.html" class="nav-item">💵 Dividends</a>
+    <a href="sectors.html" class="nav-item">📊 Sectors</a>
+    <a href="quality.html" class="nav-item">✅ Data Quality</a>
+    <span class="nav-date">📅 {{ data_date }}{% if fundamentals._data_source %} · {{ fundamentals._data_source }}{% endif %}</span>
 </div>
 
 <!-- ============================================================ -->
@@ -270,19 +270,19 @@
         </div>
         <div class="metric">
             <div class="label">P/E Ratio (TTM)</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}</div>
+            <div class="value {{ fund_color('pe', fundamentals.pe_ratio) }}">{{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">PEG Ratio</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}</div>
+            <div class="value {{ fund_color('peg', fundamentals.peg_ratio) }}">{{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Price/Book</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.price_to_book) if fundamentals.price_to_book else 'N/A' }}</div>
+            <div class="value {{ fund_color('pb', fundamentals.price_to_book) }}">{{ "%.2f"|format(fundamentals.price_to_book) if fundamentals.price_to_book else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Price/Sales</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.price_to_sales) if fundamentals.price_to_sales else 'N/A' }}</div>
+            <div class="value {{ fund_color('ps', fundamentals.price_to_sales) }}">{{ "%.2f"|format(fundamentals.price_to_sales) if fundamentals.price_to_sales else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Enterprise Value</div>
@@ -294,7 +294,7 @@
         </div>
         <div class="metric">
             <div class="label">EV/EBITDA</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.ev_to_ebitda) if fundamentals.ev_to_ebitda else 'N/A' }}</div>
+            <div class="value {{ fund_color('ev_ebitda', fundamentals.ev_to_ebitda) }}">{{ "%.2f"|format(fundamentals.ev_to_ebitda) if fundamentals.ev_to_ebitda else 'N/A' }}</div>
         </div>
     </div>
 
@@ -303,19 +303,19 @@
     <div class="metrics-grid">
         <div class="metric">
             <div class="label">Revenue Growth (YoY)</div>
-            <div class="value {{ 'positive' if fundamentals.revenue_growth_yoy and fundamentals.revenue_growth_yoy > 0 else 'negative' }}">
+            <div class="value {{ fund_color('rg', fundamentals.revenue_growth_yoy) }}">
                 {{ "%.2f"|format(fundamentals.revenue_growth_yoy) ~ '%' if fundamentals.revenue_growth_yoy else 'N/A' }}
             </div>
         </div>
         <div class="metric">
             <div class="label">EPS Growth (YoY)</div>
-            <div class="value {{ 'positive' if fundamentals.eps_growth_yoy and fundamentals.eps_growth_yoy > 0 else 'negative' }}">
+            <div class="value {{ fund_color('eps_growth', fundamentals.eps_growth_yoy) }}">
                 {{ "%.2f"|format(fundamentals.eps_growth_yoy) ~ '%' if fundamentals.eps_growth_yoy else 'N/A' }}
             </div>
         </div>
         <div class="metric">
             <div class="label">EPS (TTM)</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div>
+            <div class="value {{ fund_color('eps', fundamentals.eps_ttm) }}">{{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Revenue (TTM)</div>
@@ -336,31 +336,31 @@
     <div class="metrics-grid">
         <div class="metric">
             <div class="label">ROE</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
+            <div class="value {{ fund_color('roe', fundamentals.roe) }}">{{ "%.2f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">ROIC</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.roic) ~ '%' if fundamentals.roic else 'N/A' }}</div>
+            <div class="value {{ fund_color('roic', fundamentals.roic) }}">{{ "%.2f"|format(fundamentals.roic) ~ '%' if fundamentals.roic else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">ROA</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.roa) ~ '%' if fundamentals.roa else 'N/A' }}</div>
+            <div class="value {{ fund_color('roa', fundamentals.roa) }}">{{ "%.2f"|format(fundamentals.roa) ~ '%' if fundamentals.roa else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Gross Margin</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.gross_margin) ~ '%' if fundamentals.gross_margin else 'N/A' }}</div>
+            <div class="value {{ fund_color('gm', fundamentals.gross_margin) }}">{{ "%.2f"|format(fundamentals.gross_margin) ~ '%' if fundamentals.gross_margin else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Operating Margin</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.operating_margin) ~ '%' if fundamentals.operating_margin else 'N/A' }}</div>
+            <div class="value {{ fund_color('om', fundamentals.operating_margin) }}">{{ "%.2f"|format(fundamentals.operating_margin) ~ '%' if fundamentals.operating_margin else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Net Margin</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.net_margin) ~ '%' if fundamentals.net_margin else 'N/A' }}</div>
+            <div class="value {{ fund_color('nm', fundamentals.net_margin) }}">{{ "%.2f"|format(fundamentals.net_margin) ~ '%' if fundamentals.net_margin else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">FCF Margin</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.fcf_margin) ~ '%' if fundamentals.fcf_margin else 'N/A' }}</div>
+            <div class="value {{ fund_color('fcfm', fundamentals.fcf_margin) }}">{{ "%.2f"|format(fundamentals.fcf_margin) ~ '%' if fundamentals.fcf_margin else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Operating Income (TTM)</div>
@@ -373,17 +373,17 @@
     <div class="metrics-grid">
         <div class="metric">
             <div class="label">Debt/Equity</div>
-            <div class="value {{ 'positive' if fundamentals.debt_to_equity and fundamentals.debt_to_equity < 1 else 'negative' }}">
+            <div class="value {{ fund_color('de', fundamentals.debt_to_equity) }}">
                 {{ "%.2f"|format(fundamentals.debt_to_equity) if fundamentals.debt_to_equity else 'N/A' }}
             </div>
         </div>
         <div class="metric">
             <div class="label">Current Ratio</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.current_ratio) if fundamentals.current_ratio else 'N/A' }}</div>
+            <div class="value {{ fund_color('cr', fundamentals.current_ratio) }}">{{ "%.2f"|format(fundamentals.current_ratio) if fundamentals.current_ratio else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Quick Ratio</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.quick_ratio) if fundamentals.quick_ratio else 'N/A' }}</div>
+            <div class="value {{ fund_color('qr', fundamentals.quick_ratio) }}">{{ "%.2f"|format(fundamentals.quick_ratio) if fundamentals.quick_ratio else 'N/A' }}</div>
         </div>
         <div class="metric">
             <div class="label">Total Assets</div>
@@ -403,7 +403,7 @@
         </div>
         <div class="metric">
             <div class="label">Dividend Yield</div>
-            <div class="value">{{ "%.2f"|format(fundamentals.dividend_yield) ~ '%' if fundamentals.dividend_yield else 'N/A' }}</div>
+            <div class="value {{ fund_color('yield', fundamentals.dividend_yield) }}">{{ "%.2f"|format(fundamentals.dividend_yield) ~ '%' if fundamentals.dividend_yield else 'N/A' }}</div>
         </div>
     </div>
 
@@ -640,6 +640,52 @@
     {% endif %}
 </div>
 
+<!-- Chart & Indicator Glossary (layman, ELI10) -->
+<div class="card">
+    <h2>📚 Chart &amp; Indicator Glossary — explained like you're 10</h2>
+    <p class="section-desc">Every term and short-form used on this page, in plain words with a simple example.</p>
+    <div class="table-wrap">
+        <table class="glossary">
+            <thead><tr><th>Term</th><th>What it means (simple)</th><th>Example</th></tr></thead>
+            <tbody>
+                <tr><td><strong>RSI</strong><br>(Relative Strength Index)</td>
+                    <td>A 0–100 speed meter of how fast the price has been rising or falling. Above 70 = bought too fast (may rest/drop); below 30 = sold too fast (may bounce).</td>
+                    <td>Like a swing pushed very high (70+) — it usually swings back down soon.</td></tr>
+                <tr><td><strong>Stochastic</strong><br>(%K and %D)</td>
+                    <td>Two lines (0–100) showing where today's price sits inside its recent high–low range. Above 80 = near the ceiling; below 20 = near the floor. %K is the fast line, %D is the slower, smoother line.</td>
+                    <td>A ball in a box: at 90 it's near the top (may come down), at 10 near the bottom (may bounce up).</td></tr>
+                <tr><td><strong>MACD</strong><br>(Moving Avg Convergence Divergence)</td>
+                    <td>Compares a fast and a slow average of the price. When the MACD line crosses <em>above</em> its signal line it's a bullish hint; crossing <em>below</em> is bearish. The bars show how far apart they are.</td>
+                    <td>Two runners: when the fast runner overtakes the slow one, momentum is turning up.</td></tr>
+                <tr><td><strong>Bollinger Bands</strong></td>
+                    <td>A price "envelope" — an average line with an upper and lower band. Price near the upper band = relatively expensive; near the lower = relatively cheap. Bands widen when the price is jumpy.</td>
+                    <td>Guard-rails on a road: touching the top rail means the price has run high for now.</td></tr>
+                <tr><td><strong>SMA / EMA</strong><br>(Simple / Exponential Moving Average)</td>
+                    <td>The average price over the last N days, drawn as a smooth line to reveal the trend. SMA 20 = 20-day average, SMA 50 = 50-day. EMA reacts a bit faster (weights recent days more).</td>
+                    <td>Price above its SMA 50 line = generally trending up.</td></tr>
+                <tr><td><strong>Golden / Death Cross</strong></td>
+                    <td>When the short average crosses <em>above</em> the long average = "golden cross" (bullish). Crossing <em>below</em> = "death cross" (bearish).</td>
+                    <td>Fast line jumping over the slow line going up = a hopeful sign.</td></tr>
+                <tr><td><strong>Volume</strong></td>
+                    <td>How many shares were traded that day — how busy the day was. <span class="positive">Green bar</span> = price rose that day, <span class="negative">red bar</span> = price fell. "Vol SMA 20" is the 20-day average, a baseline.</td>
+                    <td>A tall green bar on a price jump = lots of buyers piling in.</td></tr>
+                <tr><td><strong>ATR</strong><br>(Average True Range)</td>
+                    <td>A "bounciness" meter — how much the price typically moves in a day. Higher ATR = wilder swings; lower = calmer.</td>
+                    <td>ATR of 2 KES means the price usually moves about 2 shillings a day.</td></tr>
+                <tr><td><strong>OBV</strong><br>(On-Balance Volume)</td>
+                    <td>A running tug-of-war score: it adds volume on up days and subtracts it on down days. Rising OBV = buyers winning; falling = sellers winning.</td>
+                    <td>Like a scoreboard — if it keeps climbing, buyers are stronger.</td></tr>
+                <tr><td><strong>Support &amp; Resistance</strong></td>
+                    <td>Support = a price "floor" where buyers tend to step in and the price bounces up. Resistance = a "ceiling" where sellers step in and the price stalls.</td>
+                    <td>If a stock keeps bouncing off 50 KES, that 50 is support (the floor).</td></tr>
+                <tr><td><strong>TTM / YoY / FY</strong></td>
+                    <td>TTM = "trailing twelve months" (the last year of results). YoY = "year over year" (vs the same time last year). FY = "financial year".</td>
+                    <td>"Revenue growth YoY +10%" = sales are 10% higher than a year ago.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
 <!-- Bottom Navigation -->
 <div class="nav-bar bottom-nav">
     <a href="index.html" class="nav-item">🏠 Overview</a>
@@ -654,6 +700,16 @@
 
 {% block extra_css %}
 <style>
+    /* Good/bad colour cues — green = healthy, red = weak/risky.
+       (These classes were previously undefined in the report, so the cues
+       never actually showed.) */
+    .positive { color: #16a34a; font-weight: 700; }
+    .negative { color: #dc2626; font-weight: 700; }
+    /* Glossary table — allow the explanation text to wrap */
+    .glossary td { white-space: normal; vertical-align: top; font-size: 0.85rem; line-height: 1.5; }
+    .glossary td:first-child { white-space: nowrap; font-weight: 600; }
+    .glossary th { font-size: 0.72rem; }
+    .glossary td:nth-child(3) { color: var(--text-muted); }
     /* Navigation */
     .nav-bar {
         display: flex;
