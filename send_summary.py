@@ -83,6 +83,11 @@ def main():
 
     force = '--force-refresh' in sys.argv
 
+    # New day → wipe stale data cache so the first run fetches fresh (does NOT
+    # touch the reports folder here, to avoid clobbering a local dashboard).
+    from utils import enforce_daily_cache
+    enforce_daily_cache(config.cache_dir)
+
     data_acq = DataAcquisition(data_sources=config.data_sources, cache_dir=config.cache_dir)
     engine = AnalysisEngine(config=config)
     # clean_old=False so building the summary does not wipe an existing

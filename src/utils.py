@@ -2,12 +2,81 @@
 Shared utilities: retry decorator, helpers.
 """
 
+import os
 import time
 import functools
 import logging
+from datetime import datetime
 from typing import Tuple, List
 
 logger = logging.getLogger(__name__)
+
+CACHE_MARKER = ".cache_date"
+
+
+def enforce_daily_cache(data_dir, reports_dir=None):
+    """
+    Guarantee cache freshness by calendar day.
+
+    - Same day: the data cache is kept and reused (fast repeat runs).
+    - New day (or first ever run): ALL cached data files are deleted first, so
+      the first run of a new day never reuses yesterday's data — it fetches
+      everything fresh.
+    - Reports are cleared on every run (they are always regenerated).
+
+    The history/ subdirectory (long-term daily log) and the marker file are
+    preserved. Returns True if a new-day wipe happened, else False.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    is_new_day = True
+
+    # Always clear the reports folder (fresh reports every run).
+    if reports_dir and os.path.isdir(reports_dir):
+        for name in os.listdir(reports_dir):
+            path = os.path.join(reports_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+
+    if not data_dir:
+        return False
+    os.makedirs(data_dir, exist_ok=True)
+
+    marker = os.path.join(data_dir, CACHE_MARKER)
+    if os.path.exists(marker):
+        try:
+            with open(marker) as f:
+                is_new_day = f.read().strip() != today
+        except OSError:
+            is_new_day = True
+
+    if is_new_day:
+        removed = 0
+        for name in os.listdir(data_dir):
+            if name in ("history", CACHE_MARKER):
+                continue  # preserve the long-term log and the marker
+            path = os.path.join(data_dir, name)
+            if os.path.isfile(path):
+                try:
+                    os.remove(path)
+                    removed += 1
+                except OSError:
+                    pass
+        try:
+            with open(marker, "w") as f:
+                f.write(today)
+        except OSError:
+            pass
+        logger.info(
+            f"New day ({today}) — cleared {removed} stale cache files; "
+            f"this run fetches fresh data."
+        )
+    else:
+        logger.info(f"Same day ({today}) — reusing cached data where available.")
+
+    return is_new_day
 
 
 def retry(max_attempts=3, backoff=2, exceptions=(Exception,)):

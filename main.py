@@ -82,6 +82,14 @@ def main():
     logger.info("=" * 60)
 
     try:
+        # ---- Enforce cache freshness by day ----
+        # New day (or --force-refresh) → wipe stale data cache and clear reports
+        # so nothing from a previous day is ever reused. Same day → keep cache.
+        from utils import enforce_daily_cache
+        new_day = enforce_daily_cache(config.cache_dir, config.report_directory)
+        if args.force_refresh:
+            logger.info("--force-refresh: ignoring any same-day cache.")
+
         # ---- Initialize ----
         data_acq = DataAcquisition(
             data_sources=config.data_sources,
@@ -91,6 +99,7 @@ def main():
         report_gen = ReportGenerator(
             template_dir=config.template_dir,
             output_dir=config.report_directory,
+            clean_old=False,  # reports already cleared by enforce_daily_cache
         )
         sector_analyzer = SectorAnalyzer()
 
