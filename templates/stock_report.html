@@ -4,11 +4,13 @@
 {% block content %}
 <!-- Navigation Bar -->
 <div class="nav-bar">
-    <a href="index.html" class="nav-link">← Back to NSE Dashboard</a>
-    <span class="nav-date">📅 Data as of: {{ data_date }}</span>
-    {% if fundamentals._data_source %}
-    <span class="nav-source">Source: {{ fundamentals._data_source }}</span>
-    {% endif %}
+    <a href="index.html" class="nav-item">🏠 Overview</a>
+    <a href="technicals.html" class="nav-item">📈 Technicals</a>
+    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
+    <a href="dividends.html" class="nav-item">💵 Dividends</a>
+    <a href="sectors.html" class="nav-item">📊 Sectors</a>
+    <a href="quality.html" class="nav-item">✅ Data Quality</a>
+    <span class="nav-date">📅 {{ data_date }}{% if fundamentals._data_source %} · {{ fundamentals._data_source }}{% endif %}</span>
 </div>
 
 <!-- Header -->
@@ -640,8 +642,12 @@
 
 <!-- Bottom Navigation -->
 <div class="nav-bar bottom-nav">
-    <a href="index.html" class="nav-link">← Back to NSE Dashboard</a>
-    <span class="nav-date">📅 Data as of: {{ data_date }}</span>
+    <a href="index.html" class="nav-item">🏠 Overview</a>
+    <a href="technicals.html" class="nav-item">📈 Technicals</a>
+    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
+    <a href="dividends.html" class="nav-item">💵 Dividends</a>
+    <a href="sectors.html" class="nav-item">📊 Sectors</a>
+    <a href="quality.html" class="nav-item">✅ Data Quality</a>
 </div>
 
 {% endblock %}
@@ -667,6 +673,18 @@
         font-size: 0.9rem;
     }
     .nav-link:hover { text-decoration: underline; }
+    /* Page tabs (match the dashboard nav) */
+    .nav-item {
+        padding: 7px 13px;
+        border-radius: 8px;
+        background: #f1f5f9;
+        color: #334155;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.85rem;
+        border: 1px solid #e2e8f0;
+    }
+    .nav-item:hover { border-color: #3b82f6; color: #1e293b; }
     .nav-date {
         color: var(--text-muted);
         font-size: 0.85rem;
