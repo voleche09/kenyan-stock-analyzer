@@ -987,6 +987,10 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                 'dps': fund.get('dps_fy'),
                 'ex_date': fund.get('dividend_ex_date'),
                 'ex_upcoming': fund.get('dividend_ex_date_is_upcoming'),
+                'dividend_status': fund.get('dividend_status'),
+                'book_closure': fund.get('dividend_book_closure'),
+                'payment_date': fund.get('dividend_payment_date'),
+                'dividend_type': fund.get('dividend_type'),
                 # Transparent factor score (0-100)
                 'score': (scores or {}).get(symbol, {}).get('overall'),
                 # Price validation (independent cross-check + freshness)
@@ -1022,32 +1026,417 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                     data_date = f['_data_date']
                     break
 
-        html = self._build_index_html(
-            stocks=stocks,
-            gainers=gainers,
-            losers=losers,
-            sectors=sector_data,
-            breadth=breadth,
-            sector_chart=sector_chart,
-            bullish=bullish,
-            bearish=bearish,
-            neutral=neutral,
-            total=len(stocks),
-            data_date=data_date,
-            alerts=alerts,
-            usd_kes=usd_kes,
+        index_path = self._build_dashboard_pages(
+            stocks=stocks, gainers=gainers, losers=losers, sectors=sector_data,
+            breadth=breadth, sector_chart=sector_chart, bullish=bullish,
+            bearish=bearish, neutral=neutral, total=len(stocks),
+            data_date=data_date, alerts=alerts, usd_kes=usd_kes,
+        )
+        return index_path
+
+    # Navigation across the dashboard pages (filename, label).
+    _NAV = [
+        ('index.html', '🏠 Overview'),
+        ('technicals.html', '📈 Technicals'),
+        ('fundamentals.html', '💰 Fundamentals'),
+        ('dividends.html', '💵 Dividends'),
+        ('sectors.html', '📊 Sectors'),
+        ('quality.html', '✅ Data Quality'),
+    ]
+
+    def _dashboard_css(self):
+        """Shared stylesheet for all dashboard pages (plain string)."""
+        return """<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; }
+.container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+.header { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 26px; border-radius: 12px; margin-bottom: 16px; text-align: center; }
+.header h1 { font-size: 1.8rem; margin-bottom: 5px; }
+.header .date { color: #94a3b8; font-size: 0.85rem; }
+/* Nav */
+.nav { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+.nav-item { padding: 10px 16px; border-radius: 8px; background: white; color: #334155; text-decoration: none; font-weight: 600; font-size: 0.9rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 2px solid transparent; }
+.nav-item:hover { border-color: #93c5fd; }
+.nav-item.active { background: #1e293b; color: #fff; }
+.page-intro { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+/* Stats */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: white; padding: 16px; border-radius: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.stat-card .stat-value { font-size: 1.8rem; font-weight: 700; }
+.stat-card .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-top: 4px; }
+.stat-card .bullish { color: #22c55e; } .stat-card .bearish { color: #ef4444; } .stat-card .neutral { color: #f59e0b; }
+/* Section */
+.section { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.section h2 { font-size: 1.1rem; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #3b82f6; display: inline-block; }
+/* Table */
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
+th { background: #f8fafc; color: #64748b; font-size: 0.7rem; text-transform: uppercase; font-weight: 600; position: sticky; top: 0; }
+tr:hover { background: #f8fafc; }
+.stock-link { color: #3b82f6; text-decoration: none; font-weight: 600; }
+.stock-link:hover { text-decoration: underline; }
+/* Badges */
+.badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: capitalize; }
+.bullish, .golden_cross, .bullish_cross, .oversold, .buy { background: #dcfce7; color: #166534; }
+.bearish, .death_cross, .bearish_cross, .overbought, .sell { background: #fee2e2; color: #991b1b; }
+.neutral, .within_bands, .normal { background: #fef3c7; color: #92400e; }
+.strong_buy { background: #16a34a; color: #fff; }
+.strong_sell { background: #dc2626; color: #fff; }
+.undefined { background: #f1f5f9; color: #64748b; }
+.high_volume { background: #ede9fe; color: #5b21b6; }
+.low_volume { background: #f1f5f9; color: #64748b; }
+/* Score chips */
+.score { display: inline-block; min-width: 30px; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.75rem; text-align: center; }
+.score-high { background: #dcfce7; color: #166534; }
+.score-mid { background: #fef3c7; color: #92400e; }
+.score-low { background: #fee2e2; color: #991b1b; }
+.pv-mark { font-size: 0.75rem; cursor: help; }
+/* Dividend */
+.div-pay { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #ccfbf1; color: #0f766e; font-weight: 700; }
+.div-unverified { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #fef3c7; color: #92400e; font-weight: 700; cursor: help; }
+.div-zero { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #f1f5f9; color: #94a3b8; font-weight: 600; }
+.exdate-upcoming { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #16a34a; color: #fff; font-weight: 700; }
+.exdate-past { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #e0e7ff; color: #3730a3; font-weight: 600; }
+.exdate-none { color: #cbd5e1; }
+.cal-chip { display: inline-block; padding: 2px 8px; border-radius: 10px; font-weight: 700; font-size: 0.78rem; }
+.cal-near { background: #16a34a; color: #fff; }
+.cal-far { background: #fde68a; color: #92400e; }
+.cal-passed { background: #fecaca; color: #991b1b; }
+.cal-legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+.cal-h3 { font-size: 0.95rem; margin-bottom: 10px; }
+.cal-count { color: #94a3b8; font-weight: 400; }
+/* Alerts */
+.alerts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
+.alert-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #3b82f6; border-radius: 8px; padding: 10px 12px; }
+.alert-card .sym { font-weight: 700; color: #3b82f6; margin-bottom: 4px; }
+.alert-card .items { font-size: 0.8rem; color: #475569; line-height: 1.5; }
+.dq-note { font-size: 0.8rem; color: #64748b; margin-top: 8px; }
+.dq-mismatch { color: #991b1b; }
+.mcap-cell { font-size: 0.8rem; color: #475569; }
+.positive { color: #22c55e; font-weight: 600; }
+.negative { color: #ef4444; font-weight: 600; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.sector-card { background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; }
+.sector-card h3 { font-size: 0.9rem; margin-bottom: 4px; }
+.sector-change { font-size: 1.3rem; font-weight: 700; }
+.sector-detail { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
+.chart-img { max-width: 100%; border-radius: 8px; margin-top: 12px; }
+.filter-bar { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
+.filter-bar input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; width: 220px; }
+.footer { text-align: center; padding: 20px; color: #94a3b8; font-size: 0.8rem; }
+@media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
+</style>"""
+
+    def _page_shell(self, page_title, active_file, subtitle, body_html, with_filter=False):
+        """Wrap a page body in the shared shell (head, header, nav, footer)."""
+        nav = ''.join(
+            f'<a href="{fn}" class="nav-item{" active" if fn == active_file else ""}">{lbl}</a>'
+            for fn, lbl in self._NAV
+        )
+        js = ("<script>function filterTable(){var i=document.getElementById('search');"
+              "var q=i?i.value.toLowerCase():'';var rows=document.querySelectorAll('#mainTable tbody tr');"
+              "rows.forEach(function(r){r.style.display=(!q||r.textContent.toLowerCase().indexOf(q)>-1)?'':'none';});}</script>"
+              ) if with_filter else ""
+        return (
+            '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
+            f'<title>{page_title}</title>' + self._dashboard_css() + '</head><body>'
+            '<div class="container">'
+            f'<div class="header"><h1>🇰🇪 NSE Dashboard</h1><div class="date">{subtitle}</div></div>'
+            f'<div class="nav">{nav}</div>'
+            f'{body_html}'
+            '<div class="footer">Generated by Kenyan Stock Analyzer · '
+            'Click any stock symbol for its full individual report</div>'
+            '</div>' + js + '</body></html>'
         )
 
-        path = os.path.join(self.output_dir, 'index.html')
-        with open(path, 'w', encoding='utf-8') as f:
-            f.write(html)
-        logger.info(f"Index dashboard saved: {path}")
-        return path
+    def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
+                               sector_chart, bullish, bearish, neutral, total,
+                               data_date=None, alerts=None, usd_kes=None):
+        """
+        Build the multi-page dashboard: a clean Overview plus grouped detail
+        pages (Technicals, Fundamentals, Dividends, Sectors, Data Quality).
+        Every piece of data from the old single page is preserved, just moved
+        to a related page. Writes all pages and returns the index.html path.
+        """
+        now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
+        data_date_str = data_date or datetime.now().strftime('%Y-%m-%d')
+        fx = f" · 💵 USD/KES {usd_kes['rate']:.2f}" if (usd_kes and usd_kes.get('rate')) else ""
+        subtitle = (f"{now} · {total} stocks · 📅 {data_date_str} · "
+                    f"Prices: NSE official close · Fundamentals: TradingView{fx}")
+
+        pv_marker = {
+            'ok': ('✓', '#16a34a', 'Verified against independent source'),
+            'mismatch': ('❗', '#dc2626', ''),
+            'stale': ('🕒', '#d97706', ''),
+            'unverified': ('', '#94a3b8', 'No independent source to compare'),
+        }
+
+        def price_cell(s):
+            price_str = f"{s['price']:.2f}" if s['price'] else '—'
+            val = s.get('validation') or {}
+            mark, color, tip0 = pv_marker.get(val.get('status', 'unverified'), ('', '#94a3b8', ''))
+            tip = val.get('note') or tip0
+            mk = f'<span class="pv-mark" style="color:{color}" title="{tip}">{mark}</span>' if mark else ''
+            return f'{price_str} {mk}'
+
+        def change_td(s):
+            cls = 'positive' if (s['change'] or 0) >= 0 else 'negative'
+            txt = f"{s['change']:+.2f}%" if s['change'] is not None else '—'
+            return f'<td class="{cls}">{txt}</td>'
+
+        def signal_td(s):
+            return f'<td><span class="badge {s["signal_class"]}">{s["signal_label"]}</span></td>'
+
+        def score_td(s):
+            sc = s.get('score')
+            if sc is None:
+                return '<td>—</td>'
+            c = 'score-high' if sc >= 70 else 'score-mid' if sc >= 45 else 'score-low'
+            return f'<td><span class="score {c}">{sc}</span></td>'
+
+        def sym_td(s):
+            link = s['report_file'] if s['report_file'] else '#'
+            return f'<td><a href="{link}" class="stock-link"><strong>{s["symbol"]}</strong></a></td>'
+
+        # ---- Market pulse stats (shared on Overview) ----
+        breadth_html = ''
+        for key, label in [('pct_above_sma50', 'Above SMA50'),
+                           ('pct_bullish_macd', 'Bullish MACD'),
+                           ('pct_rsi_above_50', 'RSI > 50')]:
+            if breadth and key in breadth:
+                breadth_html += (f'<div class="stat-card"><div class="stat-value">{breadth[key]}%'
+                                 f'</div><div class="stat-label">{label}</div></div>')
+        stats_html = (
+            '<div class="stats">'
+            f'<div class="stat-card"><div class="stat-value">{total}</div><div class="stat-label">Stocks</div></div>'
+            f'<div class="stat-card"><div class="stat-value bullish">{bullish}</div><div class="stat-label">Bullish</div></div>'
+            f'<div class="stat-card"><div class="stat-value bearish">{bearish}</div><div class="stat-label">Bearish</div></div>'
+            f'<div class="stat-card"><div class="stat-value neutral">{neutral}</div><div class="stat-label">Neutral</div></div>'
+            f'{breadth_html}</div>'
+        )
+
+        # ---- Top movers ----
+        gainer_rows = ''.join(
+            f'<tr><td>{g["symbol"]}</td><td class="positive">{g["change"]:+.2f}%</td></tr>'
+            for g in gainers[:10])
+        loser_rows = ''.join(
+            f'<tr><td>{l["symbol"]}</td><td class="negative">{l["change"]:+.2f}%</td></tr>'
+            for l in losers[:10])
+        movers_html = (
+            '<div class="grid-2">'
+            f'<div class="section"><h2>🟢 Top Gainers</h2><table><tr><th>Symbol</th><th>Change</th></tr>{gainer_rows}</table></div>'
+            f'<div class="section"><h2>🔴 Top Losers</h2><table><tr><th>Symbol</th><th>Change</th></tr>{loser_rows}</table></div>'
+            '</div>')
+
+        search_bar = ('<div class="filter-bar"><input type="text" id="search" '
+                      'placeholder="🔍 Filter by symbol..." oninput="filterTable()"></div>')
+
+        # ---- OVERVIEW page: critical Buy/Sell + price + change + score ----
+        ov_rows = ''.join(
+            f'<tr>{sym_td(s)}{signal_td(s)}<td>{price_cell(s)}</td>{change_td(s)}{score_td(s)}</tr>'
+            for s in stocks)
+        overview_body = (
+            '<p class="page-intro">Your at-a-glance view: the Buy/Sell signal, price and overall score for every stock. '
+            'Use the tabs above for technicals, fundamentals, dividends, sectors and data quality.</p>'
+            + stats_html + movers_html +
+            '<div class="section"><h2>📋 All Stocks — Signal &amp; Score</h2>'
+            + search_bar +
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            '<th>Symbol</th><th title="TradingView Buy/Sell rating">TV Signal</th><th>Price</th>'
+            '<th>Change</th><th title="0-100 factor screen">Score</th>'
+            f'</tr></thead><tbody>{ov_rows}</tbody></table></div></div>')
+
+        # ---- TECHNICALS page ----
+        tech_rows = ''
+        for s in stocks:
+            rsi = f"{s['rsi']:.1f}" if s['rsi'] else '—'
+            tech_rows += (
+                f'<tr>{sym_td(s)}<td>{price_cell(s)}</td>{change_td(s)}<td>{rsi}</td>'
+                f'<td><span class="badge {s["trend"]}">{s["trend"]}</span></td>'
+                f'<td><span class="badge {s["ma"]}">{s["ma"].replace("_"," ")}</span></td>'
+                f'<td><span class="badge {s["macd"]}">{s["macd"].replace("_"," ")}</span></td>'
+                f'<td><span class="badge {s["stochastic"]}">{s["stochastic"]}</span></td>'
+                f'<td><span class="badge {s["volume_signal"]}">{s["volume_signal"].replace("_"," ")}</span></td>'
+                f'<td><span class="badge {s["overall"]}">{s["overall"]}</span></td></tr>')
+        technicals_body = (
+            '<p class="page-intro">Momentum &amp; trend indicators for every stock. Green = bullish, red = bearish, amber = neutral.</p>'
+            '<div class="section"><h2>📈 Technical Indicators</h2>' + search_bar +
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            '<th>Symbol</th><th>Price</th><th>Change</th><th>RSI</th><th>Trend</th>'
+            '<th>MA</th><th>MACD</th><th>Stoch</th><th>Vol</th><th>Overall</th>'
+            f'</tr></thead><tbody>{tech_rows}</tbody></table></div></div>')
+
+        # ---- FUNDAMENTALS page ----
+        fund_rows = ''
+        for s in stocks:
+            pe = f"{s['pe_ratio']:.1f}" if s['pe_ratio'] else '—'
+            peg = f"{s['peg_ratio']:.2f}" if s.get('peg_ratio') else '—'
+            mcap = self._fmt_mcap(s['market_cap']) if s.get('market_cap') else '—'
+            roe = f"{s['roe']:.1f}%" if s.get('roe') is not None else '—'
+            dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
+            fund_rows += (
+                f'<tr>{sym_td(s)}<td>{price_cell(s)}</td><td>{pe}</td><td>{peg}</td>'
+                f'<td class="mcap-cell">{mcap}</td><td>{roe}</td><td>{dy}</td>{score_td(s)}</tr>')
+        fundamentals_body = (
+            '<p class="page-intro">Valuation &amp; quality metrics from TradingView. Lower P/E and PEG are cheaper; higher ROE is better.</p>'
+            '<div class="section"><h2>💰 Valuation &amp; Quality</h2>' + search_bar +
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            '<th>Symbol</th><th>Price</th><th>P/E</th><th>PEG</th><th>Market Cap</th>'
+            '<th>ROE</th><th>Yield</th><th>Score</th>'
+            f'</tr></thead><tbody>{fund_rows}</tbody></table></div></div>')
+
+        # ---- DIVIDENDS page (calendar + table) ----
+        today = datetime.now().date()
+        cal_rows = []
+        for s in stocks:
+            ex = s.get('ex_date')
+            if not ex:
+                continue
+            try:
+                d = datetime.strptime(ex, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                continue
+            delta = (d - today).days
+            if delta < 0:
+                cls, when, group, sortk = 'cal-passed', f'{-delta}d ago', 'past', -delta
+            elif delta <= 30:
+                cls, when, group, sortk = 'cal-near', (f'in {delta}d' if delta else 'today'), 'up', delta
+            else:
+                cls, when, group, sortk = 'cal-far', f'in {delta}d', 'up', delta
+            cal_rows.append({'symbol': s['symbol'], 'dps': s.get('dps'),
+                             'yield': s.get('dividend_yield'), 'ex': ex,
+                             'cls': cls, 'when': when, 'group': group, 'sortk': sortk})
+
+        def _cal_table(rows, empty_msg):
+            if not rows:
+                return f'<p class="dq-note">{empty_msg}</p>'
+            body = ''
+            for r in rows:
+                dps = f"{round(r['dps'],2):g}" if r['dps'] else '0'
+                yld = f"{r['yield']:.1f}%" if r['yield'] else '—'
+                body += (f'<tr><td><strong>{r["symbol"]}</strong></td><td>{dps}</td><td>{yld}</td>'
+                         f'<td><span class="cal-chip {r["cls"]}">{r["ex"]}</span></td><td>{r["when"]}</td></tr>')
+            return ('<table><thead><tr><th>Symbol</th><th>Div KES</th><th>Yield</th>'
+                    f'<th>Ex-Date</th><th>When</th></tr></thead><tbody>{body}</tbody></table>')
+
+        upcoming = sorted([r for r in cal_rows if r['group'] == 'up'], key=lambda r: r['sortk'])
+        past = sorted([r for r in cal_rows if r['group'] == 'past'], key=lambda r: r['sortk'])
+
+        div_rows = ''
+        for s in stocks:
+            dps = s.get('dps')
+            dstatus = s.get('dividend_status')
+            if dps and dps > 0:
+                if dstatus == 'unverified':
+                    amt = f'<span class="div-unverified" title="TradingView figure — not cross-checked">{round(dps,2):g}*</span>'
+                else:
+                    amt = f'<span class="div-pay">{round(dps,2):g}</span>'
+            else:
+                amt = '<span class="div-zero">0</span>'
+            dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
+            bc = s.get('book_closure') or s.get('ex_date') or '—'
+            pay = s.get('payment_date') or '—'
+            dtype = s.get('dividend_type') or ''
+            div_rows += (f'<tr>{sym_td(s)}<td>{amt}</td><td>{dy}</td><td>{bc}</td>'
+                         f'<td>{pay}</td><td>{dtype}</td></tr>')
+        dividends_body = (
+            '<p class="page-intro">Declared dividends from the NSE calendar (mystocks). '
+            '<span class="div-unverified">amber*</span> = TradingView figure that could not be cross-checked.</p>'
+            '<div class="section"><h2>💵 Dividend Calendar</h2>'
+            '<div class="cal-legend"><span class="cal-chip cal-near">soon (≤30d)</span>'
+            '<span class="cal-chip cal-far">later (&gt;30d)</span>'
+            '<span class="cal-chip cal-passed">passed</span></div>'
+            '<div class="grid-2">'
+            f'<div><h3 class="cal-h3">🟢 Upcoming Ex-Dividend Dates <span class="cal-count">({len(upcoming)})</span></h3>'
+            f'<div class="table-wrap">{_cal_table(upcoming, "No upcoming ex-dividend dates.")}</div></div>'
+            f'<div><h3 class="cal-h3">🔴 Past Ex-Dividend Dates <span class="cal-count">({len(past)})</span></h3>'
+            f'<div class="table-wrap">{_cal_table(past, "No past ex-dividend dates recorded.")}</div></div>'
+            '</div><div class="dq-note">Own the shares before the book-closure/ex-date to qualify.</div></div>'
+            '<div class="section"><h2>📋 All Dividends</h2>' + search_bar +
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            '<th>Symbol</th><th>Div KES</th><th>Yield</th><th>Book closure / Ex-date</th>'
+            '<th>Payment date</th><th>Type</th>'
+            f'</tr></thead><tbody>{div_rows}</tbody></table></div></div>')
+
+        # ---- SECTORS page ----
+        sector_cards = ''
+        if sectors:
+            for name, data in sectors.items():
+                chg = data['avg_change_pct']
+                cls = 'positive' if chg >= 0 else 'negative'
+                sector_cards += (f'<div class="sector-card"><h3>{name}</h3>'
+                                 f'<div class="sector-change {cls}">{chg:+.2f}%</div>'
+                                 f'<div class="sector-detail">{data["count"]} stocks | RSI '
+                                 f'{data.get("avg_rsi", "—")} | {data["bullish_ratio"]}% bullish</div></div>')
+        sector_chart_html = (f'<img src="data:image/png;base64,{sector_chart}" class="chart-img" '
+                             'alt="Sector Performance">') if sector_chart else ''
+        sectors_body = (
+            '<p class="page-intro">How each NSE sector performed today.</p>'
+            f'<div class="section"><h2>📊 Sector Performance</h2><div class="grid-3">{sector_cards}</div>'
+            f'{sector_chart_html}</div>')
+
+        # ---- DATA QUALITY page (validation + alerts) ----
+        v_ok = v_mismatch = v_stale = v_unverified = 0
+        mismatch_list = []
+        for s in stocks:
+            st = (s.get('validation') or {}).get('status')
+            if st == 'ok':
+                v_ok += 1
+            elif st == 'mismatch':
+                v_mismatch += 1
+                mismatch_list.append(s)
+            elif st == 'stale':
+                v_stale += 1
+            else:
+                v_unverified += 1
+        mismatch_note = ''
+        if mismatch_list:
+            items = ', '.join(
+                f"{m['symbol']} ({(m.get('validation') or {}).get('pct_diff'):+.1f}%)"
+                for m in mismatch_list)
+            mismatch_note = (f'<div class="dq-note dq-mismatch">⚠️ TradingView differs from the NSE '
+                             f'official close for: {items}</div>')
+        alerts_cards = ''
+        for sym in sorted((alerts or {}).keys()):
+            items = alerts[sym]
+            if items:
+                alerts_cards += (f'<div class="alert-card"><div class="sym">{sym}</div>'
+                                 f'<div class="items">{"<br>".join(items)}</div></div>')
+        alerts_section = (f'<div class="section"><h2>🔔 Alerts &amp; Signals</h2>'
+                          f'<div class="alerts-grid">{alerts_cards}</div></div>') if alerts_cards else ''
+        quality_body = (
+            '<p class="page-intro">How much to trust today\'s prices, and notable per-stock alerts.</p>'
+            '<div class="section"><h2>✅ Data Quality</h2><div class="stats">'
+            f'<div class="stat-card"><div class="stat-value bullish">{v_ok}</div><div class="stat-label">Verified</div></div>'
+            f'<div class="stat-card"><div class="stat-value bearish">{v_mismatch}</div><div class="stat-label">Price mismatch</div></div>'
+            f'<div class="stat-card"><div class="stat-value neutral">{v_stale}</div><div class="stat-label">Stale / thin</div></div>'
+            f'<div class="stat-card"><div class="stat-value">{v_unverified}</div><div class="stat-label">Unverified</div></div></div>'
+            '<div class="dq-note">Prices shown are the <strong>NSE official close</strong> (afx.kwayisi.org), '
+            'cross-checked against TradingView. ✓ = TradingView confirms it · ❗ = differs · 🕒 = last traded &gt;1 day ago.</div>'
+            f'{mismatch_note}</div>{alerts_section}')
+
+        # ---- Assemble & write all pages ----
+        pages = {
+            'index.html': self._page_shell('NSE Dashboard — Overview', 'index.html', subtitle, overview_body, with_filter=True),
+            'technicals.html': self._page_shell('NSE — Technicals', 'technicals.html', subtitle, technicals_body, with_filter=True),
+            'fundamentals.html': self._page_shell('NSE — Fundamentals', 'fundamentals.html', subtitle, fundamentals_body, with_filter=True),
+            'dividends.html': self._page_shell('NSE — Dividends', 'dividends.html', subtitle, dividends_body, with_filter=True),
+            'sectors.html': self._page_shell('NSE — Sectors', 'sectors.html', subtitle, sectors_body),
+            'quality.html': self._page_shell('NSE — Data Quality', 'quality.html', subtitle, quality_body),
+        }
+        for filename, html in pages.items():
+            with open(os.path.join(self.output_dir, filename), 'w', encoding='utf-8') as f:
+                f.write(html)
+        logger.info(f"Dashboard saved: {len(pages)} pages — {', '.join(pages.keys())}")
+        return os.path.join(self.output_dir, 'index.html')
 
     def _build_index_html(self, stocks, gainers, losers, sectors, breadth,
                           sector_chart, bullish, bearish, neutral, total,
                           data_date=None, alerts=None, usd_kes=None):
-        """Build the single-page index dashboard HTML."""
+        """[DEPRECATED — replaced by _build_dashboard_pages] Kept for reference."""
         now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
         data_date_str = data_date or datetime.now().strftime('%Y-%m-%d')
 
