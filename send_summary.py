@@ -128,6 +128,13 @@ def main():
     fund_analyzer = FundamentalAnalysis(cache_dir=config.cache_dir)
     fundamentals_data = fund_analyzer.fetch_all_fundamentals(force_refresh=force)
 
+    # ---- Validate dividends against the authoritative NSE calendar ----
+    try:
+        from dividend_calendar import apply_dividend_calendar
+        apply_dividend_calendar(fundamentals_data, cache_dir=config.cache_dir, logger=logger)
+    except Exception as e:
+        logger.warning(f"Dividend validation skipped: {e}")
+
     # ---- Context, scoring, alerts ----
     usd_kes = None
     try:

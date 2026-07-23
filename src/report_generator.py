@@ -987,6 +987,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                 'dps': fund.get('dps_fy'),
                 'ex_date': fund.get('dividend_ex_date'),
                 'ex_upcoming': fund.get('dividend_ex_date_is_upcoming'),
+                'dividend_status': fund.get('dividend_status'),
                 # Transparent factor score (0-100)
                 'score': (scores or {}).get(symbol, {}).get('overall'),
                 # Price validation (independent cross-check + freshness)
@@ -1089,10 +1090,17 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             dy = s.get('dividend_yield')
             dy_str = f"{dy:.1f}%" if dy else '—'
 
-            # Dividend amount (KES/share) — 0 when the stock pays nothing
+            # Dividend amount (KES/share). Calendar-verified where possible;
+            # TradingView (flagged) where the calendar can't confirm; 0 if none.
             dps = s.get('dps')
+            div_status = s.get('dividend_status')
             if dps and dps > 0:
-                div_html = f'<span class="div-pay">{dps:g}</span>'
+                dps_disp = f"{round(dps, 2):g}"
+                if div_status == 'unverified':
+                    div_html = (f'<span class="div-unverified" title="TradingView figure '
+                                f'— not cross-checked on the NSE calendar">{dps_disp}*</span>')
+                else:
+                    div_html = f'<span class="div-pay">{dps_disp}</span>'
             else:
                 div_html = '<span class="div-zero">0</span>'
 
@@ -1349,6 +1357,7 @@ tr:hover {{ background: #f8fafc; }}
 
 /* Dividend amount (teal "money" highlight) vs 0 (muted) */
 .div-pay {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #ccfbf1; color: #0f766e; font-weight: 700; }}
+.div-unverified {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #fef3c7; color: #92400e; font-weight: 700; cursor: help; }}
 .div-zero {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #f1f5f9; color: #94a3b8; font-weight: 600; }}
 /* Ex-dividend date — a different colour family from the amount */
 .exdate-upcoming {{ display: inline-block; padding: 2px 8px; border-radius: 10px; background: #16a34a; color: #ffffff; font-weight: 700; cursor: help; }}
