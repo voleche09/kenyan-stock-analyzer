@@ -1325,8 +1325,7 @@ tr:hover { background: #f8fafc; }
         upcoming = sorted([r for r in cal_rows if r['group'] == 'up'], key=lambda r: r['sortk'])
         past = sorted([r for r in cal_rows if r['group'] == 'past'], key=lambda r: r['sortk'])
 
-        div_rows = ''
-        for s in stocks:
+        def _div_row(s):
             dps = s.get('dps')
             dstatus = s.get('dividend_status')
             if dps and dps > 0:
@@ -1338,10 +1337,14 @@ tr:hover { background: #f8fafc; }
                 amt = '<span class="div-zero">0</span>'
             dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
             bc = s.get('book_closure') or s.get('ex_date') or '—'
-            pay = s.get('payment_date') or '—'
-            dtype = s.get('dividend_type') or ''
-            div_rows += (f'<tr>{sym_td(s)}<td>{amt}</td><td>{dy}</td><td>{bc}</td>'
-                         f'<td>{pay}</td><td>{dtype}</td></tr>')
+            return f'<tr>{sym_td(s)}<td>{amt}</td><td>{dy}</td><td>{bc}</td></tr>'
+
+        # Dividend payers first (highest yield on top), then the zeros.
+        payers = sorted(
+            [s for s in stocks if s.get('dps') and s['dps'] > 0],
+            key=lambda s: s.get('dividend_yield') or 0, reverse=True)
+        nonpayers = [s for s in stocks if not (s.get('dps') and s['dps'] > 0)]
+        div_rows = ''.join(_div_row(s) for s in payers + nonpayers)
         dividends_body = (
             '<p class="page-intro">Declared dividends from the NSE calendar (mystocks). '
             '<span class="div-unverified">amber*</span> = TradingView figure that could not be cross-checked.</p>'
@@ -1358,7 +1361,6 @@ tr:hover { background: #f8fafc; }
             '<div class="section"><h2>📋 All Dividends</h2>' + search_bar +
             '<div class="table-wrap"><table id="mainTable"><thead><tr>'
             '<th>Symbol</th><th>Div KES</th><th>Yield</th><th>Book closure / Ex-date</th>'
-            '<th>Payment date</th><th>Type</th>'
             f'</tr></thead><tbody>{div_rows}</tbody></table></div></div>')
 
         # ---- SECTORS page ----
