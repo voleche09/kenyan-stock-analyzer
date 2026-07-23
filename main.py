@@ -167,6 +167,14 @@ def main():
         )
         logger.info(f"Fundamental data loaded for {len(fundamentals_data)} stocks")
 
+        # ---- Validate dividends against the authoritative NSE calendar ----
+        try:
+            from dividend_calendar import apply_dividend_calendar
+            logger.info("Validating dividends against the NSE dividend calendar...")
+            apply_dividend_calendar(fundamentals_data, cache_dir=config.cache_dir, logger=logger)
+        except Exception as e:
+            logger.warning(f"Dividend validation skipped: {e}")
+
         # ---- Market context: sector medians + USD/KES ----
         sector_medians = {}
         usd_kes = None
