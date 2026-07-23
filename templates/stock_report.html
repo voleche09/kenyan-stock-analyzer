@@ -144,26 +144,42 @@
             <div class="km-label">Market Cap</div>
         </div>
         <div class="key-metric">
-            <div class="km-value {{ 'positive' if fundamentals.pe_ratio and fundamentals.pe_ratio < 15 else '' }}">
+            <div class="km-value {{ fund_color('pe', fundamentals.pe_ratio) }}">
                 {{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}
             </div>
             <div class="km-label">P/E Ratio</div>
         </div>
         <div class="key-metric">
-            <div class="km-value {{ 'positive' if fundamentals.peg_ratio and fundamentals.peg_ratio < 1 else 'negative' }}">
+            <div class="km-value {{ fund_color('peg', fundamentals.peg_ratio) }}">
                 {{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}
             </div>
             <div class="km-label">PEG Ratio</div>
         </div>
         <div class="key-metric">
-            <div class="km-value">{{ "%.1f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
+            <div class="km-value {{ fund_color('roe', fundamentals.roe) }}">{{ "%.1f"|format(fundamentals.roe) ~ '%' if fundamentals.roe else 'N/A' }}</div>
             <div class="km-label">ROE</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value {{ fund_color('eps', fundamentals.eps_ttm) }}">{{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm is not none else 'N/A' }}</div>
+            <div class="km-label">EPS</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value {{ fund_color('nm', fundamentals.net_margin) }}">{{ "%.1f"|format(fundamentals.net_margin) ~ '%' if fundamentals.net_margin is not none else 'N/A' }}</div>
+            <div class="km-label">Net Margin</div>
+        </div>
+        <div class="key-metric">
+            <div class="km-value {{ fund_color('de', fundamentals.debt_to_equity) }}">{{ "%.2f"|format(fundamentals.debt_to_equity) if fundamentals.debt_to_equity is not none else 'N/A' }}</div>
+            <div class="km-label">Debt / Equity</div>
         </div>
         <div class="key-metric">
             <div class="km-value">{{ "%.1f"|format(latest.rsi) if latest.rsi else 'N/A' }}</div>
             <div class="km-label">RSI (14)</div>
         </div>
     </div>
+    <p style="font-size:0.78rem; color:var(--text-muted); margin-top:8px;">
+        <span class="positive" style="font-weight:700;">Green</span> = healthy value ·
+        <span class="negative" style="font-weight:700;">Red</span> = weak/risky value · plain = average. See the guide below for what each means.
+    </p>
 
     <!-- Plain English Explanations -->
     <div class="explanations-section">

@@ -427,6 +427,7 @@ class ReportGenerator:
             'interpret_roe': self._interpret_roe,
             'interpret_de': self._interpret_de,
             'interpret_rsi': self._interpret_rsi,
+            'fund_color': self._fund_color,
         }
 
         html_content = self._render('stock_report.html', template_data)
@@ -1143,6 +1144,9 @@ tr:hover { background: #f8fafc; }
 .explain-card p { font-size: 0.84rem; color: #475569; line-height: 1.5; margin: 5px 0; }
 .explain-card .eg { color: #0f766e; }
 .explain-card .good { color: #166534; }
+/* Fundamental cell verdicts: green = good, red = bad */
+.fgood { color: #16a34a; font-weight: 700; }
+.fbad { color: #dc2626; font-weight: 700; }
 @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
 </style>"""
 
@@ -1168,6 +1172,39 @@ tr:hover { background: #f8fafc; }
             'Click any stock symbol for its full individual report</div>'
             '</div>' + js + '</body></html>'
         )
+
+    @staticmethod
+    def _fund_verdict(metric, value):
+        """
+        Judge a fundamental value as 'good', 'bad', or None (neutral), using
+        the same layman thresholds shown in the plain-English guide. Used to
+        colour cells green (good) / red (bad) so quality is visible at a glance.
+        """
+        if value is None:
+            return None
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return None
+        rules = {
+            'pe':    lambda: 'good' if 0 < v <= 15 else 'bad' if (v <= 0 or v > 30) else None,
+            'peg':   lambda: 'good' if 0 < v <= 1 else 'bad' if (v < 0 or v > 2.5) else None,
+            'pb':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 5) else None,
+            'eps':   lambda: 'good' if v > 0 else 'bad' if v < 0 else None,
+            'roe':   lambda: 'good' if v >= 15 else 'bad' if v < 5 else None,
+            'nm':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else None,
+            'de':    lambda: 'good' if 0 <= v <= 0.5 else 'bad' if (v < 0 or v > 2) else None,
+            'rg':    lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
+            'yield': lambda: 'good' if v >= 5 else None,
+        }
+        fn = rules.get(metric)
+        return fn() if fn else None
+
+    @staticmethod
+    def _fund_color(metric, value):
+        """Return 'positive'/'negative'/'' (green/red/neutral) for templates."""
+        verdict = ReportGenerator._fund_verdict(metric, value)
+        return 'positive' if verdict == 'good' else 'negative' if verdict == 'bad' else ''
 
     def _fundamentals_explainer(self):
         """Plain-English guide to each fundamental metric, for non-experts."""
@@ -1342,6 +1379,10 @@ tr:hover { background: #f8fafc; }
             f'</tr></thead><tbody>{tech_rows}</tbody></table></div></div>')
 
         # ---- FUNDAMENTALS page ----
+        def fcls(metric, raw):
+            v = self._fund_verdict(metric, raw)
+            return 'fgood' if v == 'good' else 'fbad' if v == 'bad' else ''
+
         fund_rows = ''
         for s in stocks:
             pe = f"{s['pe_ratio']:.1f}" if s['pe_ratio'] else '—'
@@ -1353,16 +1394,23 @@ tr:hover { background: #f8fafc; }
             nm = f"{s['net_margin']:.1f}%" if s.get('net_margin') is not None else '—'
             de = f"{s['debt_to_equity']:.2f}" if s.get('debt_to_equity') is not None else '—'
             rg = s.get('revenue_growth')
-            rg_str = (f'<span class="{"positive" if rg >= 0 else "negative"}">{rg:+.1f}%</span>'
-                      if rg is not None else '—')
+            rg_str = f"{rg:+.1f}%" if rg is not None else '—'
             dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
             fund_rows += (
                 f'<tr>{sym_td(s)}<td>{price_cell(s)}</td><td class="mcap-cell">{mcap}</td>'
-                f'<td>{pe}</td><td>{peg}</td><td>{pb}</td><td>{eps}</td>'
-                f'<td>{roe}</td><td>{nm}</td><td>{de}</td><td>{rg_str}</td><td>{dy}</td>{score_td(s)}</tr>')
+                f'<td class="{fcls("pe", s.get("pe_ratio"))}">{pe}</td>'
+                f'<td class="{fcls("peg", s.get("peg_ratio"))}">{peg}</td>'
+                f'<td class="{fcls("pb", s.get("price_to_book"))}">{pb}</td>'
+                f'<td class="{fcls("eps", s.get("eps"))}">{eps}</td>'
+                f'<td class="{fcls("roe", s.get("roe"))}">{roe}</td>'
+                f'<td class="{fcls("nm", s.get("net_margin"))}">{nm}</td>'
+                f'<td class="{fcls("de", s.get("debt_to_equity"))}">{de}</td>'
+                f'<td class="{fcls("rg", rg)}">{rg_str}</td>'
+                f'<td class="{fcls("yield", s.get("dividend_yield"))}">{dy}</td>{score_td(s)}</tr>')
         fundamentals_body = (
             '<p class="page-intro">Valuation, quality, growth &amp; health metrics (from TradingView). '
-            'New to these? The plain-English guide with examples is right below the table.</p>'
+            '<span class="fgood">Green = good</span>, <span class="fbad">red = weak/risky</span>, '
+            'plain = average. New to these? The plain-English guide with examples is right below the table.</p>'
             '<div class="section"><h2>💰 Fundamentals</h2>' + search_bar +
             '<div class="table-wrap"><table id="mainTable"><thead><tr>'
             '<th>Symbol</th><th>Price</th><th>Market Cap</th><th title="Price / Earnings">P/E</th>'
