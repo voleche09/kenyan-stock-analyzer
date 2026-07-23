@@ -1103,6 +1103,10 @@ tr:hover { background: #f8fafc; }
 .cal-near { background: #16a34a; color: #fff; }
 .cal-far { background: #fde68a; color: #92400e; }
 .cal-passed { background: #fecaca; color: #991b1b; }
+/* Book-closure / ex-date urgency: green=future, amber=within a week, red=passed */
+.bc-future { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #16a34a; color: #fff; font-weight: 700; }
+.bc-soon { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #f59e0b; color: #fff; font-weight: 700; }
+.bc-passed { display: inline-block; padding: 2px 8px; border-radius: 10px; background: #dc2626; color: #fff; font-weight: 700; }
 .cal-legend { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .cal-h3 { font-size: 0.95rem; margin-bottom: 10px; }
 .cal-count { color: #94a3b8; font-weight: 400; }
@@ -1325,6 +1329,23 @@ tr:hover { background: #f8fafc; }
         upcoming = sorted([r for r in cal_rows if r['group'] == 'up'], key=lambda r: r['sortk'])
         past = sorted([r for r in cal_rows if r['group'] == 'past'], key=lambda r: r['sortk'])
 
+        def _bc_chip(bc_str):
+            # Colour by urgency: red = passed, amber = within a week, green = later.
+            if not bc_str:
+                return '<span class="exdate-none">—</span>'
+            try:
+                d = datetime.strptime(bc_str, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                return bc_str
+            delta = (d - today).days
+            if delta < 0:
+                cls = 'bc-passed'
+            elif delta <= 7:
+                cls = 'bc-soon'
+            else:
+                cls = 'bc-future'
+            return f'<span class="{cls}">{bc_str}</span>'
+
         def _div_row(s):
             dps = s.get('dps')
             dstatus = s.get('dividend_status')
@@ -1336,7 +1357,7 @@ tr:hover { background: #f8fafc; }
             else:
                 amt = '<span class="div-zero">0</span>'
             dy = f"{s['dividend_yield']:.1f}%" if s.get('dividend_yield') else '—'
-            bc = s.get('book_closure') or s.get('ex_date') or '—'
+            bc = _bc_chip(s.get('book_closure') or s.get('ex_date'))
             return f'<tr>{sym_td(s)}<td>{amt}</td><td>{dy}</td><td>{bc}</td></tr>'
 
         # Dividend payers first (highest yield on top), then the zeros.
@@ -1358,7 +1379,12 @@ tr:hover { background: #f8fafc; }
             f'<div><h3 class="cal-h3">🔴 Past Ex-Dividend Dates <span class="cal-count">({len(past)})</span></h3>'
             f'<div class="table-wrap">{_cal_table(past, "No past ex-dividend dates recorded.")}</div></div>'
             '</div><div class="dq-note">Own the shares before the book-closure/ex-date to qualify.</div></div>'
-            '<div class="section"><h2>📋 All Dividends</h2>' + search_bar +
+            '<div class="section"><h2>📋 All Dividends</h2>'
+            '<div class="cal-legend">Book closure / ex-date: '
+            '<span class="bc-future">upcoming</span>'
+            '<span class="bc-soon">within a week</span>'
+            '<span class="bc-passed">passed</span></div>'
+            + search_bar +
             '<div class="table-wrap"><table id="mainTable"><thead><tr>'
             '<th>Symbol</th><th>Div KES</th><th>Yield</th><th>Book closure / Ex-date</th>'
             f'</tr></thead><tbody>{div_rows}</tbody></table></div></div>')
