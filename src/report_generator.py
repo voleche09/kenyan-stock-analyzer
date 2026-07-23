@@ -167,8 +167,10 @@ class ReportGenerator:
         """RSI with overbought/oversold zones."""
         fig, ax = plt.subplots(figsize=(12, 3.5))
         ax.plot(data.index, data['rsi'], label='RSI', color=COLORS['rsi'], linewidth=1.2)
-        ax.axhline(y=70, color=COLORS['sma50'], linestyle='--', alpha=0.7, linewidth=0.8)
-        ax.axhline(y=30, color=COLORS['bullish'], linestyle='--', alpha=0.7, linewidth=0.8)
+        ax.axhline(y=70, color=COLORS['sma50'], linestyle='--', alpha=0.7, linewidth=0.8,
+                   label='Overbought (70) — may pull back')
+        ax.axhline(y=30, color=COLORS['bullish'], linestyle='--', alpha=0.7, linewidth=0.8,
+                   label='Oversold (30) — may bounce')
         ax.fill_between(data.index, 70, 100, alpha=0.06, color=COLORS['sma50'])
         ax.fill_between(data.index, 0, 30, alpha=0.06, color=COLORS['bullish'])
         ax.set_ylim(0, 100)
@@ -205,12 +207,19 @@ class ReportGenerator:
         ]
         colors = [COLORS['volume']] + colors  # align length
         ax.bar(data.index, data['volume'], color=colors, alpha=0.7, width=0.8)
+        # Explain the bar colours (green = price rose that day, red = fell)
+        from matplotlib.patches import Patch
+        legend_handles = [
+            Patch(facecolor=COLORS['bullish'], alpha=0.7, label='Up day (price rose)'),
+            Patch(facecolor=COLORS['sma50'], alpha=0.7, label='Down day (price fell)'),
+        ]
         if 'volume_sma_20' in data.columns:
-            ax.plot(data.index, data['volume_sma_20'], label='Vol SMA 20',
-                    color=COLORS['sma20'], linewidth=1.5)
+            sma_line, = ax.plot(data.index, data['volume_sma_20'], label='Vol SMA 20 (average)',
+                                color=COLORS['sma20'], linewidth=1.5)
+            legend_handles.append(sma_line)
         ax.set_title(title, fontsize=13, fontweight='bold')
         ax.set_xlabel('')
-        ax.legend(fontsize=9)
+        ax.legend(handles=legend_handles, fontsize=9)
         ax.grid(True, alpha=0.3)
         ax.yaxis.set_major_formatter(mticker.FuncFormatter(
             lambda x, p: f'{x/1e6:.1f}M' if x >= 1e6 else f'{x/1e3:.0f}K'
@@ -221,10 +230,12 @@ class ReportGenerator:
     def _make_stochastic_chart(self, data, title):
         """Stochastic Oscillator (%K and %D)."""
         fig, ax = plt.subplots(figsize=(12, 3.5))
-        ax.plot(data.index, data['stoch_k'], label='%K', color=COLORS['stoch_k'], linewidth=1.2)
-        ax.plot(data.index, data['stoch_d'], label='%D', color=COLORS['stoch_d'], linewidth=1)
-        ax.axhline(y=80, color=COLORS['sma50'], linestyle='--', alpha=0.5, linewidth=0.8)
-        ax.axhline(y=20, color=COLORS['bullish'], linestyle='--', alpha=0.5, linewidth=0.8)
+        ax.plot(data.index, data['stoch_k'], label='%K (fast line)', color=COLORS['stoch_k'], linewidth=1.2)
+        ax.plot(data.index, data['stoch_d'], label='%D (slow line)', color=COLORS['stoch_d'], linewidth=1)
+        ax.axhline(y=80, color=COLORS['sma50'], linestyle='--', alpha=0.5, linewidth=0.8,
+                   label='Overbought (80) — near top of range')
+        ax.axhline(y=20, color=COLORS['bullish'], linestyle='--', alpha=0.5, linewidth=0.8,
+                   label='Oversold (20) — near bottom of range')
         ax.fill_between(data.index, 80, 100, alpha=0.06, color=COLORS['sma50'])
         ax.fill_between(data.index, 0, 20, alpha=0.06, color=COLORS['bullish'])
         ax.set_ylim(0, 100)
@@ -1198,10 +1209,20 @@ tr:hover { background: #f8fafc; }
             'pe':    lambda: 'good' if 0 < v <= 15 else 'bad' if (v <= 0 or v > 30) else None,
             'peg':   lambda: 'good' if 0 < v <= 1 else 'bad' if (v < 0 or v > 2.5) else None,
             'pb':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 5) else None,
+            'ps':    lambda: 'good' if 0 < v <= 1.5 else 'bad' if (v < 0 or v > 6) else None,
+            'ev_ebitda': lambda: 'good' if 0 < v <= 10 else 'bad' if (v < 0 or v > 20) else None,
             'eps':   lambda: 'good' if v > 0 else 'bad' if v < 0 else None,
+            'eps_growth': lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
             'roe':   lambda: 'good' if v >= 15 else 'bad' if v < 5 else None,
+            'roic':  lambda: 'good' if v >= 12 else 'bad' if v < 5 else None,
+            'roa':   lambda: 'good' if v >= 8 else 'bad' if v < 2 else None,
+            'gm':    lambda: 'good' if v >= 40 else 'bad' if v < 15 else None,
+            'om':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else None,
             'nm':    lambda: 'good' if v >= 15 else 'bad' if v < 0 else None,
+            'fcfm':  lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
             'de':    lambda: 'good' if 0 <= v <= 0.5 else 'bad' if (v < 0 or v > 2) else None,
+            'cr':    lambda: 'good' if v >= 1.5 else 'bad' if v < 1 else None,
+            'qr':    lambda: 'good' if v >= 1 else 'bad' if v < 0.7 else None,
             'rg':    lambda: 'good' if v >= 10 else 'bad' if v < 0 else None,
             'yield': lambda: 'good' if v >= 5 else None,
         }
