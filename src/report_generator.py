@@ -10,6 +10,7 @@ Charts built with matplotlib + seaborn, embedded as base64 PNG.
 """
 
 import os
+import re
 import sys
 import base64
 import io
@@ -1069,6 +1070,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
         ('earnings.html', '📅 Next Earnings'),
         ('sectors.html', '📊 Sectors'),
         ('foreign.html', '🌍 Foreign Flows'),
+        ('pulse.html', '🧭 Market Pulse'),
         ('quality.html', '✅ Data Quality'),
     ]
 
@@ -1539,6 +1541,201 @@ tr:hover { background: #f8fafc; }
                 'a worked example.</p>'
                 f'<div class="explain-grid">{items}</div></div>')
 
+    def _build_market_pulse_body(self, analysis_results_for_pulse=None):
+        """
+        Build the Market Pulse page from live sources (news, CBK, oil, FX,
+        African indices). Fails safe per-source — the page renders whatever
+        came back and shows a note for anything missing.
+        """
+        try:
+            from market_pulse import load_all as load_pulse
+            p = load_pulse(analysis_results_for_pulse or {})
+        except Exception as e:
+            logger.warning(f"Market Pulse: loader failed: {e}")
+            p = {"news": [], "cbk": {}, "oil": [], "african_indices": [],
+                 "fx": [], "generated_at": ""}
+
+        def _pct_span(v):
+            if v is None:
+                return '<span>—</span>'
+            cls = 'positive' if v >= 0 else 'negative'
+            return f'<span class="{cls}">{v:+.2f}%</span>'
+
+        # ---- 1. Monetary policy (CBK) ----
+        cbk = p.get('cbk') or {}
+        cbr = cbk.get('cbr_pct')
+        cbk_html = (
+            '<div class="section"><h2>🏦 Monetary Policy — Central Bank of Kenya</h2>'
+            '<div class="stats">'
+            f'<div class="stat-card"><div class="stat-value">{f"{cbr:.2f}%" if cbr is not None else "—"}</div>'
+            '<div class="stat-label">Central Bank Rate (CBR)</div></div>'
+            '</div>'
+        )
+        if cbk.get('cbr_note'):
+            cbk_html += f'<p class="dq-note"><strong>MPC statement:</strong> {cbk["cbr_note"]}</p>'
+        if cbk.get('inflation_note'):
+            cbk_html += f'<p class="dq-note"><strong>Inflation:</strong> {cbk["inflation_note"]}</p>'
+        cbk_html += (f'<p class="dq-note">Source: <a href="{cbk.get("source_url", "#")}" '
+                     'target="_blank">centralbank.go.ke</a>. Higher CBR usually pressures bank '
+                     "loan books but boosts their bond income; falling CBR is the reverse.</p></div>")
+
+        # ---- 2. Oil prices ----
+        oil = p.get('oil') or []
+        if oil:
+            cards = ''
+            for o in oil:
+                chg = o.get('change_1w_pct')
+                # For oil: rising = bad for KES importer; label colour accordingly
+                cls = 'negative' if (chg or 0) > 0 else 'positive'
+                cards += (f'<div class="stat-card"><div class="stat-value {cls}">'
+                          f'${o["price_usd"]:.2f}</div>'
+                          f'<div class="stat-label">{o["name"]} · 1w {_pct_span(chg)}</div></div>')
+            oil_html = ('<div class="section"><h2>🛢️ Oil Prices (USD/barrel)</h2>'
+                        f'<div class="stats">{cards}</div>'
+                        '<p class="dq-note">Kenya is a net oil importer. <strong>Rising oil (red)</strong> '
+                        'pressures the KES and can lift inflation; <strong>falling oil (green)</strong> is '
+                        'usually favourable. Source: Yahoo Finance.</p></div>')
+        else:
+            oil_html = ''
+
+        # ---- 3. FX ----
+        fx = p.get('fx') or []
+        if fx:
+            cards = ''
+            for r in fx:
+                cards += (f'<div class="stat-card"><div class="stat-value">KES {r["rate_kes"]:.2f}</div>'
+                          f'<div class="stat-label">1 {r["code"]} = KES · {r["name"]}</div></div>')
+            fx_html = ('<div class="section"><h2>💱 KES Exchange Rates</h2>'
+                       f'<div class="stats">{cards}</div>'
+                       f'<p class="dq-note">Updated: {fx[0].get("updated", "")}. '
+                       'A weaker KES helps exporters (tea, coffee, tourism); a stronger KES helps '
+                       'importers (fuel, machinery) and the many NSE-listed dual-currency names.</p></div>')
+        else:
+            fx_html = ''
+
+        # ---- 4. African markets comparison ----
+        ai = p.get('african_indices') or []
+        if ai:
+            rows = ''
+            for idx in ai:
+                d1 = idx.get('change_1d_pct')
+                w1 = idx.get('change_1w_pct')
+                rows += (f'<tr><td><strong>{idx["name"]}</strong></td>'
+                         f'<td>{idx["country"]}</td>'
+                         f'<td>{f"{idx["price"]:,.2f}" if idx.get("price") else "—"}</td>'
+                         f'<td>{_pct_span(d1)}</td><td>{_pct_span(w1)}</td></tr>')
+            # Kenya rank note
+            valid = [(idx["name"], idx.get("change_1d_pct")) for idx in ai
+                     if idx.get("change_1d_pct") is not None]
+            valid.sort(key=lambda x: x[1], reverse=True)
+            kenya_rank_html = ''
+            for i, (name, chg) in enumerate(valid):
+                if '🇰🇪' in name:
+                    kenya_rank_html = (f'<p class="dq-note">🇰🇪 <strong>NSE ranks '
+                                       f'#{i+1} of {len(valid)}</strong> among African markets today '
+                                       f'({chg:+.2f}%).</p>')
+                    break
+            african_html = ('<div class="section"><h2>🌍 African Markets Today</h2>'
+                            '<div class="table-wrap"><table><thead><tr>'
+                            '<th>Index</th><th>Country</th><th>Price</th>'
+                            '<th>1-day</th><th>1-week</th></tr></thead>'
+                            f'<tbody>{rows}</tbody></table></div>'
+                            + kenya_rank_html +
+                            '<p class="dq-note">Source: TradingView. Kenya is derived from our own NSE stock '
+                            'data (equal-weight average) since Yahoo/TV do not carry a reliable NSE 20 symbol.</p></div>')
+        else:
+            african_html = ''
+
+        # ---- 5. News (headlines only, NO auto-sentiment) ----
+        news = p.get('news') or []
+        news_html = ''
+        if news:
+            # Group by topic
+            by_topic = {}
+            for n in news:
+                by_topic.setdefault(n['topic'], []).append(n)
+            blocks = ''
+            for topic in ['NSE / Kenyan Stocks', 'Kenyan Banking', 'Central Bank of Kenya',
+                          'Kenyan Economy', 'Oil / Global']:
+                items = by_topic.get(topic, [])
+                if not items:
+                    continue
+                cards = ''
+                for n in items[:6]:
+                    # Format date compactly
+                    date_short = n.get('published_utc', '')
+                    m = re.match(r'(\w{3}, \d{1,2} \w{3} \d{4})', date_short)
+                    date_display = m.group(1) if m else date_short[:16]
+                    src = n.get('source', '')
+                    cards += (
+                        f'<div class="alert-card">'
+                        f'<div class="items"><a href="{n["url"]}" target="_blank" '
+                        'style="color:#3b82f6; text-decoration:none; font-weight:600;">'
+                        f'{n["title"]}</a></div>'
+                        f'<div style="font-size:0.72rem; color:#94a3b8; margin-top:6px;">'
+                        f'{date_display} · {src}</div></div>'
+                    )
+                blocks += (f'<h3 class="cal-h3" style="margin-top:14px;">📰 {topic}</h3>'
+                           f'<div class="alerts-grid">{cards}</div>')
+            news_html = ('<div class="section"><h2>📰 Latest Headlines</h2>'
+                         + blocks +
+                         '<p class="dq-note">Source: Google News RSS. Headlines are shown neutral '
+                         'with date &amp; publisher — we do NOT auto-classify positive/negative '
+                         '(free sentiment tools on financial text are too unreliable to trust with money). '
+                         'Click a headline to read the original.</p></div>')
+
+        # ---- 6. Foreign flows chip (links to the dedicated page) ----
+        foreign_chip = (
+            '<div class="section"><h2>🌍 Foreign Investor Activity</h2>'
+            '<p>Weekly figures from the NSE Weekly Market Statistics bulletin are on the '
+            '<a href="foreign.html" style="color:#3b82f6; font-weight:600;">Foreign Flows page →</a></p></div>'
+        )
+
+        # ---- 7. How to read this page ----
+        howto = self._market_pulse_glossary()
+
+        # ---- Assemble ----
+        return (
+            '<p class="page-intro">Context around the NSE trading day — the macro forces '
+            'that shape prices. Everything here is <strong>refreshed on every run</strong> '
+            'from named sources; nothing is auto-classified into a "sentiment" (see the note '
+            'at the bottom of the headlines section).</p>'
+            + cbk_html + oil_html + fx_html + african_html
+            + foreign_chip + news_html + howto
+        )
+
+    def _market_pulse_glossary(self):
+        """Plain-English guide for Market Pulse."""
+        cards = [
+            ("Central Bank Rate (CBR)",
+             "The interest rate at which CBK lends to commercial banks. It's the benchmark that flows through to loans, deposits and government bond yields.",
+             "CBR rising from 8.75% → 10% usually hurts loan-heavy banks in the short term (borrowers strain) but boosts their bond book. Falling CBR is the reverse."),
+            ("Inflation",
+             "How fast prices are rising year-over-year. High inflation eats returns and often prompts CBK to raise the CBR.",
+             "Inflation 6% while your dividend yield is 5% → your real return is negative unless the share price also rises."),
+            ("Oil price (Brent / WTI)",
+             "Kenya imports its fuel. Rising oil raises transport, electricity and manufacturing costs — feeds through to inflation and squeezes profit margins.",
+             "Brent jumping from $80 → $95 typically weakens the KES and hurts stocks like Bamburi, EABL, KenGen customers."),
+            ("KES exchange rates",
+             "A weaker KES helps exporters (tea, coffee, tourism) and hurts importers. It also inflates foreign debt costs.",
+             "KES weakening from 125 → 135 per USD makes SCOM's tower-lease costs (USD-denominated) more expensive."),
+            ("African market comparison",
+             "Where the NSE sits vs. its peers (JSE South Africa, NGX Nigeria, EGX Egypt) today. Regional sell-offs often affect NSE via foreign investor flows.",
+             "If JSE and EGX are down heavily on a global risk-off day, the NSE often follows a day later."),
+            ("Why no 'sentiment' tags?",
+             "Reliable sentiment analysis on financial short text requires a paid NLP model. Free keyword-based tagging is wrong ~40% of the time — dangerous when money is involved. So we show the source and let you decide.",
+             "A headline like 'Safaricom slides on profit warning' is clearly negative to a human but a keyword tool might miss the context."),
+        ]
+        items = ''
+        for title, what, eg in cards:
+            items += (f'<div class="explain-card"><h4>{title}</h4>'
+                      f'<p>{what}</p>'
+                      f'<p class="eg">📌 <strong>Example:</strong> {eg}</p></div>')
+        return ('<div class="section"><h2>📖 How to read this page (plain English)</h2>'
+                '<p class="page-intro">What each signal typically means for NSE stocks. '
+                'These are heuristics, not rules — every situation has exceptions.</p>'
+                f'<div class="explain-grid">{items}</div></div>')
+
     def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
                                sector_chart, bullish, bearish, neutral, total,
                                data_date=None, alerts=None, usd_kes=None):
@@ -1921,6 +2118,13 @@ tr:hover { background: #f8fafc; }
         # ---- FOREIGN FLOWS page (manual weekly input) ----
         foreign_body = self._build_foreign_flows_body(sym_td)
 
+        # ---- MARKET PULSE page (news + CBK + oil + FX + African indices) ----
+        pulse_body = self._build_market_pulse_body(
+            analysis_results_for_pulse=(
+                {s['symbol']: {'daily_change_pct': s.get('change')} for s in stocks}
+            )
+        )
+
         # ---- Assemble & write all pages ----
         pages = {
             'index.html': self._page_shell('NSE Dashboard — Overview', 'index.html', subtitle, overview_body, with_filter=True),
@@ -1930,6 +2134,7 @@ tr:hover { background: #f8fafc; }
             'earnings.html': self._page_shell('NSE — Next Earnings', 'earnings.html', subtitle, earnings_body, with_filter=True),
             'sectors.html': self._page_shell('NSE — Sectors', 'sectors.html', subtitle, sectors_body),
             'foreign.html': self._page_shell('NSE — Foreign Flows', 'foreign.html', subtitle, foreign_body),
+            'pulse.html': self._page_shell('NSE — Market Pulse', 'pulse.html', subtitle, pulse_body),
             'quality.html': self._page_shell('NSE — Data Quality', 'quality.html', subtitle, quality_body),
         }
         for filename, html in pages.items():
