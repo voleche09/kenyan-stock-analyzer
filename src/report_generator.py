@@ -1015,6 +1015,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                 'book_closure': fund.get('dividend_book_closure'),
                 'payment_date': fund.get('dividend_payment_date'),
                 'dividend_type': fund.get('dividend_type'),
+                # Next earnings date (used by the Next Earnings page)
+                'earnings_next_date': fund.get('earnings_next_date'),
                 # Transparent factor score (0-100)
                 'score': (scores or {}).get(symbol, {}).get('overall'),
                 # Price validation (independent cross-check + freshness)
@@ -1064,6 +1066,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
         ('technicals.html', '📈 Technicals'),
         ('fundamentals.html', '💰 Fundamentals'),
         ('dividends.html', '💵 Dividends'),
+        ('earnings.html', '📅 Next Earnings'),
         ('sectors.html', '📊 Sectors'),
         ('quality.html', '✅ Data Quality'),
     ]
@@ -1610,12 +1613,78 @@ tr:hover { background: #f8fafc; }
             'cross-checked against TradingView. ✓ = TradingView confirms it · ❗ = differs · 🕒 = last traded &gt;1 day ago.</div>'
             f'{mismatch_note}</div>{alerts_section}')
 
+        # ---- NEXT EARNINGS page ----
+        # Only stocks whose next earnings date is TODAY OR IN THE FUTURE
+        # (in Nairobi time). Nearest date first. Skip stocks with no earnings
+        # date entirely — this page is about upcoming events to watch.
+        try:
+            from zoneinfo import ZoneInfo
+            today_ke = datetime.now(ZoneInfo("Africa/Nairobi")).date()
+        except Exception:
+            today_ke = datetime.now().date()
+
+        earnings_rows_raw = []
+        for s in stocks:
+            nd = s.get('earnings_next_date')
+            if not nd:
+                continue
+            try:
+                edate = datetime.strptime(nd, '%Y-%m-%d').date()
+            except (ValueError, TypeError):
+                continue
+            if edate < today_ke:
+                continue  # past — exclude
+            days = (edate - today_ke).days
+            earnings_rows_raw.append((days, edate, s))
+        earnings_rows_raw.sort(key=lambda t: t[0])
+
+        # Urgency chip: red = today, amber = ≤7 days, green = further out.
+        def _earnings_chip(days, date_str):
+            if days == 0:
+                cls, when = 'bc-passed', 'today'
+            elif days <= 7:
+                cls, when = 'bc-soon', f'in {days}d'
+            else:
+                cls, when = 'bc-future', f'in {days}d'
+            return f'<span class="{cls}">{date_str}</span>', when
+
+        earnings_rows = ''
+        for days, edate, s in earnings_rows_raw:
+            chip, when = _earnings_chip(days, edate.strftime('%Y-%m-%d'))
+            price_str = f"{s['price']:.2f}" if s['price'] else '—'
+            earnings_rows += (
+                f'<tr>{sym_td(s)}<td>{chip}</td><td>{when}</td>'
+                f'<td>{price_str}</td>{change_td(s)}{signal_td(s)}{score_td(s)}</tr>')
+        if not earnings_rows:
+            earnings_rows = ('<tr><td colspan="7" style="color:#94a3b8; text-align:center;">'
+                             'No upcoming earnings dates on record.</td></tr>')
+        earnings_body = (
+            '<p class="page-intro">Every stock with an upcoming earnings-release date, '
+            '<strong>nearest first</strong>. Stocks with no scheduled date, or a date already '
+            'in the past, are excluded. Earnings dates come from TradingView — confirm on the '
+            'NSE announcement before making decisions.</p>'
+            '<div class="section"><h2>📅 Upcoming Earnings</h2>'
+            '<div class="cal-legend">'
+            '<span class="bc-passed">today</span>'
+            '<span class="bc-soon">within a week</span>'
+            '<span class="bc-future">later</span>'
+            '</div>'
+            + search_bar +
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            '<th>Symbol</th><th>Earnings Date</th><th>When</th>'
+            '<th>Price</th><th>Change</th><th>TV Signal</th><th>Score</th>'
+            f'</tr></thead><tbody>{earnings_rows}</tbody></table></div>'
+            f'<div class="dq-note">{len(earnings_rows_raw)} stock(s) with an upcoming '
+            'earnings release. Earnings dates are only published for a subset of NSE stocks; '
+            'a stock not listed here simply has no scheduled date in the feed.</div></div>')
+
         # ---- Assemble & write all pages ----
         pages = {
             'index.html': self._page_shell('NSE Dashboard — Overview', 'index.html', subtitle, overview_body, with_filter=True),
             'technicals.html': self._page_shell('NSE — Technicals', 'technicals.html', subtitle, technicals_body, with_filter=True),
             'fundamentals.html': self._page_shell('NSE — Fundamentals', 'fundamentals.html', subtitle, fundamentals_body, with_filter=True),
             'dividends.html': self._page_shell('NSE — Dividends', 'dividends.html', subtitle, dividends_body, with_filter=True),
+            'earnings.html': self._page_shell('NSE — Next Earnings', 'earnings.html', subtitle, earnings_body, with_filter=True),
             'sectors.html': self._page_shell('NSE — Sectors', 'sectors.html', subtitle, sectors_body),
             'quality.html': self._page_shell('NSE — Data Quality', 'quality.html', subtitle, quality_body),
         }
