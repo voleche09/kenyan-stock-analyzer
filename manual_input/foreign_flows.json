@@ -1,0 +1,27 @@
+{
+  "_source_note": "Data is entered manually from the NSE Weekly Market Statistics bulletin. See manual_input/README.md for the exact steps. Nothing here is auto-fetched — every number must be traceable to a specific NSE publication.",
+  "_source_home": "https://www.nse.co.ke/market-statistics/",
+  "weeks": [
+    {
+      "week_ending": "2026-07-25",
+      "source_label": "NSE Weekly Market Statistics — sample seed (replace with real bulletin figures)",
+      "source_url": "https://www.nse.co.ke/market-statistics/",
+      "aggregate": {
+        "foreign_participation_pct": 59.8,
+        "foreign_buys_kes": 1200000000,
+        "foreign_sells_kes": 1345000000,
+        "net_foreign_flow_kes": -145000000
+      },
+      "top_foreign_buys": [
+        {"symbol": "SCOM", "value_kes": 457000000},
+        {"symbol": "EQTY", "value_kes": 180000000},
+        {"symbol": "KCB",  "value_kes": 110000000}
+      ],
+      "top_foreign_sells": [
+        {"symbol": "EABL", "value_kes": 210000000},
+        {"symbol": "BAT",  "value_kes":  95000000},
+        {"symbol": "SCBK", "value_kes":  60000000}
+      ]
+    }
+  ]
+}
