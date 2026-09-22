@@ -249,6 +249,25 @@ def main():
         except Exception as e:
             logger.warning(f"Portfolio tracking skipped: {e}")
 
+        # ---- Personal bond portfolio (private — portfolio/bonds.json, gitignored) ----
+        # Skipped entirely (empty-state section) if the user hasn't added bonds.
+        # A bond's cash flows are fixed contractual facts, not live market data,
+        # so this needs no network call — pure, fast local computation.
+        bond_portfolio = None
+        try:
+            import bonds_portfolio as bonds_mod
+            bond_lots = bonds_mod.load_bonds(config.portfolio_dir)
+            if bond_lots:
+                logger.info(f"Bonds: {len(bond_lots)} holding(s)")
+                bond_portfolio = bonds_mod.compute_bond_portfolio(bond_lots)
+                if bond_portfolio and bond_portfolio['missing_issues']:
+                    logger.warning(
+                        f"Bonds: no reference data for "
+                        f"{', '.join(bond_portfolio['missing_issues'])}"
+                    )
+        except Exception as e:
+            logger.warning(f"Bond tracking skipped: {e}")
+
         # ---- Individual reports (only if --detailed) ----
         report_files = {}
         if args.detailed:
@@ -307,6 +326,7 @@ def main():
             portfolio_history=portfolio_history_rows,
             portfolio_news=portfolio_news,
             portfolio_history_tracker=portfolio_history_tracker,
+            bond_portfolio=bond_portfolio,
         )
 
         # ---- Email ----

@@ -985,7 +985,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                        report_files=None, fundamentals_data=None,
                        validations=None, scores=None, alerts=None, usd_kes=None,
                        portfolio_summary=None, portfolio_history=None, portfolio_news=None,
-                       portfolio_history_tracker=None):
+                       portfolio_history_tracker=None, bond_portfolio=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -1112,6 +1112,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             data_date=data_date, alerts=alerts, usd_kes=usd_kes,
             portfolio_summary=portfolio_summary, portfolio_history=portfolio_history,
             portfolio_news=portfolio_news, portfolio_history_tracker=portfolio_history_tracker,
+            bond_portfolio=bond_portfolio,
         )
         return index_path
 
@@ -3080,11 +3081,400 @@ tr:hover { background: #f8fafc; }
 
         return ''.join(parts)
 
+    # ==================================================================
+    # MY BONDS — private Treasury/Infrastructure bond holdings.
+    # Lives on the SAME private 💼 My Portfolio page as the stock holdings
+    # above (appended after them) — never its own page, never public.
+    # ==================================================================
+    def _make_bonds_allocation_chart(self, bonds):
+        """Donut chart: face value by bond issue. Green = tax-free
+        Infrastructure Bond, blue = taxable Fixed-coupon Bond — the single
+        biggest driver of your after-tax return, visible at a glance."""
+        avail = [b for b in bonds if b.get('data_available')]
+        if not avail:
+            return None
+        items = sorted(avail, key=lambda b: b['face_value'], reverse=True)
+        labels = [b['issue'] for b in items]
+        values = [b['face_value'] for b in items]
+        colors = ['#16a34a' if b['tax_free'] else '#2563eb' for b in items]
+        fig, ax = plt.subplots(figsize=(6.4, 5.6))
+        wedges, _, autotexts = ax.pie(
+            values, labels=None, autopct=lambda p: f'{p:.0f}%' if p >= 4 else '',
+            startangle=90, colors=colors, pctdistance=0.78,
+            wedgeprops=dict(width=0.42, edgecolor='white', linewidth=2))
+        for t in autotexts:
+            t.set_fontsize(9); t.set_fontweight('bold'); t.set_color('white')
+        total = sum(values)
+        ax.text(0, 0, f"KES\n{total/1e6:.2f}M", ha='center', va='center',
+                fontsize=13, fontweight='bold')
+        ax.legend(wedges, [f'{l} ({v/total*100:.0f}%)' for l, v in zip(labels, values)],
+                  loc='center left', bbox_to_anchor=(1.02, 0.5), fontsize=9, frameon=False)
+        ax.set_title('Bond Portfolio by Face Value\n(green = tax-free IFB · blue = taxable FXD)',
+                     fontsize=12, fontweight='bold')
+        return self._fig_to_b64()
+
+    def _make_bonds_cashflow_chart(self, calendar_rows):
+        """Stacked bar: coupon income + principal repayment by calendar
+        year — directly answers 'when do I get paid, and how much'."""
+        if not calendar_rows:
+            return None
+        by_year = {}
+        for r in calendar_rows:
+            yr = r['date'][:4]
+            a = by_year.setdefault(yr, {'coupon': 0.0, 'principal': 0.0})
+            a['coupon'] += r['coupon']
+            a['principal'] += r['principal']
+        years = sorted(by_year.keys())
+        coupons = [by_year[y]['coupon'] for y in years]
+        principals = [by_year[y]['principal'] for y in years]
+        fig, ax = plt.subplots(figsize=(11, 4.6))
+        ax.bar(years, coupons, label='Coupon (interest) income', color=COLORS['bullish'], alpha=0.85)
+        ax.bar(years, principals, bottom=coupons, label='Principal repaid', color=COLORS['price'], alpha=0.85)
+        ax.set_title('Projected Bond Cash Flow by Year', fontsize=13, fontweight='bold')
+        ax.set_ylabel('KES')
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(
+            lambda x, p: f'{x/1e6:.2f}M' if abs(x) >= 1e6 else f'{x/1e3:.0f}K'))
+        ax.legend(loc='upper left', fontsize=9)
+        ax.grid(True, alpha=0.3, axis='y')
+        plt.xticks(rotation=45 if len(years) > 14 else 0)
+        return self._fig_to_b64()
+
+    def _make_bonds_sensitivity_chart(self, series):
+        """Line chart: indicative DIRTY PRICE (per KES 100 face) of each
+        holding across a spread of market yields — shows interest-rate risk
+        (duration) honestly, instead of a single invented 'current price'.
+        Normalized to price-per-100 (not absolute KES) so a KES 500,000
+        holding and a KES 100,000 holding are equally visible on one chart
+        — this is also the standard way bond prices are actually quoted.
+        series = [(issue, rows)] from bonds_portfolio.bond_price_sensitivity()."""
+        series = [(issue, rows) for issue, rows in series if rows]
+        if not series:
+            return None
+        palette = ['#2563eb', '#16a34a', '#f59e0b', '#8b5cf6', '#ef4444', '#0ea5e9']
+        fig, ax = plt.subplots(figsize=(11, 5.2))
+        for i, (issue, rows) in enumerate(series):
+            xs = [r['yield_pct'] for r in rows]
+            ys = [r['dirty_price_per_100'] for r in rows]
+            color = palette[i % len(palette)]
+            ax.plot(xs, ys, marker='o', markersize=4, linewidth=1.8, color=color, label=issue)
+            coupon_row = next((r for r in rows if r['is_coupon_yield']), None)
+            if coupon_row:
+                ax.axvline(x=coupon_row['yield_pct'], color=color, linestyle=':', linewidth=1, alpha=0.5)
+        ax.axhline(y=100, color='#94a3b8', linestyle='-', linewidth=0.8, alpha=0.6)
+        ax.set_title("If Market Yields Move, Here's What Each Bond Would Be Worth",
+                     fontsize=13, fontweight='bold')
+        ax.set_xlabel("Market yield (%) — dotted vertical line marks each bond's own coupon rate")
+        ax.set_ylabel('Dirty price per KES 100 face value (100 = par)')
+        ax.legend(loc='best', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        return self._fig_to_b64()
+
+    def _build_bonds_holdings_body(self, bond_portfolio):
+        """
+        My Bonds section — your real Treasury/Infrastructure bond holdings.
+        Appended onto the SAME private portfolio.html page as your stock
+        holdings. Every coupon rate, date and redemption rule shown here is
+        sourced from an official CBK prospectus (cited per bond); nothing
+        is fabricated. '' is never returned — an empty portfolio gets a
+        clear how-to-add empty state, same discipline as stocks.
+        """
+        # ---------- empty state: no bonds.json yet ----------
+        if not bond_portfolio:
+            return (
+                '<div class="section"><h2>🏦 My Bonds</h2>'
+                '<p class="page-intro">You haven\'t added any bond holdings yet. Like your stock '
+                'holdings above, this is 100% private — your bonds live in '
+                '<code>portfolio/bonds.json</code> on your own machine and are '
+                '<strong>never committed to git</strong>.</p>'
+                '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
+                '<strong>Add your first bond — two ways:</strong>'
+                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
+                'overflow-x:auto;font-size:0.85rem;">python3 add_bond.py IFB1/2023/6.5 150000</pre>'
+                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/bonds.json</code> directly — '
+                'see <code>portfolio/README.md</code> for the exact format.</p>'
+                '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this section fills in: '
+                'accrued interest, next payment date &amp; amount, the full cash-flow schedule to '
+                'redemption, after-tax income, running yield and total return — plus charts.</p>'
+                '</div></div>')
+
+        t = bond_portfolio['totals']
+        bonds = bond_portfolio['bonds']
+        avail = [b for b in bonds if b['data_available']]
+        as_of = bond_portfolio.get('as_of', '')
+        parts = []
+
+        # ---------- privacy / disclaimer ----------
+        parts.append(
+            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
+            'padding:14px 18px;margin:28px 0 18px;font-size:0.9rem;color:#78350f;">'
+            '⚠️ <strong>Your private bond portfolio — educational information, not financial or tax '
+            'advice.</strong> Coupon rates, dates and redemption rules are sourced from official CBK '
+            'prospectuses (cited per bond below) — contractual facts, not estimates. Anything marked '
+            '"indicative" depends on where market yields are trading today, which this dashboard cannot '
+            'observe live for these specific bonds — use it as a starting point, not a quote. This file '
+            'is never committed to git; see <code>portfolio/README.md</code>.</div>')
+
+        # ---------- unrecognized-bond warning ----------
+        missing = bond_portfolio.get('missing_issues') or []
+        if missing:
+            parts.append(
+                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
+                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                f'⚠️ <strong>No verified reference data for: {", ".join(missing)}.</strong> '
+                'These are excluded from the totals below rather than shown with guessed terms. Add '
+                'them to <code>BOND_REFERENCE</code> in <code>src/bonds_portfolio.py</code>, citing the '
+                'official CBK prospectus, to include them.</div>')
+
+        # ---------- hero totals ----------
+        parts.append(
+            '<div class="section"><h2>🏦 My Bonds</h2>'
+            f'<p class="page-intro">As of {as_of} · {t["n_available"]} of {t["n_bonds"]} bond(s) with '
+            'verified terms. Kenya Government Treasury &amp; Infrastructure Bonds — a fixed-income '
+            'complement to your stock holdings above.</p>'
+            '<div class="stats">'
+            f'<div class="stat-card"><div class="stat-value">KES {t["face_value"]:,.0f}</div>'
+            '<div class="stat-label">Total Face Value</div></div>'
+            f'<div class="stat-card"><div class="stat-value">KES {t["accrued_interest"]:,.0f}</div>'
+            '<div class="stat-label">Accrued Interest Today</div></div>'
+            f'<div class="stat-card"><div class="stat-value positive">KES {t["indicative_value_par"]:,.0f}</div>'
+            '<div class="stat-label">Indicative Value (at par)</div></div>'
+            f'<div class="stat-card"><div class="stat-value">KES {t["annual_pretax_income"]:,.0f}</div>'
+            '<div class="stat-label">Annual Income (pre-tax)</div></div>'
+            f'<div class="stat-card"><div class="stat-value positive">KES {t["annual_after_tax_income"]:,.0f}</div>'
+            '<div class="stat-label">Annual Income (after tax)</div></div>'
+            f'<div class="stat-card"><div class="stat-value">'
+            + (f'{t["blended_running_yield_after_tax_pct"]:.2f}%' if t.get("blended_running_yield_after_tax_pct") is not None else '—')
+            + '</div><div class="stat-label">Blended After-Tax Yield</div></div>'
+            '</div>'
+            '<div class="dq-note">"Indicative Value (at par)" = outstanding face value still owed to you '
+            '+ interest already accrued since your last coupon. It assumes each bond is currently worth '
+            'exactly its face value — a standard, conservative simplification for buy-and-hold retail '
+            'bonds. The chart below shows how this would change if market yields were actually higher or '
+            'lower than each bond\'s own coupon.</div></div>')
+
+        # ---------- educational: how to read this section ----------
+        parts.append(
+            '<div class="section"><h2>📘 Understanding Your Bonds</h2>'
+            '<p class="page-intro">A quick primer on the concepts below, written for exactly the four '
+            'bonds you hold.</p>'
+            '<div class="explain-grid">'
+            '<div class="explain-card"><h4>🟢 Infrastructure Bonds (IFB) are tax-free</h4>'
+            '<p>Under the Income Tax Act, interest from Kenyan Infrastructure Bonds is <strong>fully '
+            'exempt</strong> from withholding tax — every shilling of coupon is yours. Three of your four '
+            'bonds are IFBs.</p></div>'
+            '<div class="explain-card"><h4>🔵 Fixed-coupon Bonds (FXD) are taxed</h4>'
+            '<p>Your FXD1/2022/025 is a standard taxable Treasury bond. Withholding tax on Treasury bond '
+            'interest is <strong>10% for tenors of 10 years or more</strong> (15% for shorter tenors) — '
+            'confirmed for this bond directly in CBK\'s own prospectus pricing table.</p></div>'
+            '<div class="explain-card"><h4>📅 Coupons are paid semi-annually</h4>'
+            '<p>Every bond here pays interest twice a year, on fixed dates set at issuance. The payment '
+            'amount is always <em>face value × coupon rate ÷ 2</em> — it doesn\'t fluctuate with market '
+            'yields once you own the bond; only the coupon <em>rate</em> was set once, at issuance/auction.</p></div>'
+            '<div class="explain-card"><h4>⏳ Accrued interest</h4>'
+            '<p>Interest builds up daily between coupon dates. This dashboard uses CBK\'s own convention '
+            '— Actual/365 on the annual coupon rate — reverse-verified against real "Accrued Interest (AI)" '
+            'figures CBK itself publishes in its prospectuses.</p></div>'
+            '<div class="explain-card"><h4>🧩 Amortization — principal paid back early</h4>'
+            '<p>Unlike a typical bond that repays 100% of principal only at maturity, Kenyan '
+            'Infrastructure Bonds are usually <strong>amortized</strong>: a chunk of your principal comes '
+            'back on one or more dates <em>before</em> the final maturity date, printed right on the '
+            'prospectus (e.g. "50% in 2027, 30% in 2029, 20% in 2030"). Your FXD bond is NOT amortized — '
+            'it\'s a plain bullet bond, full KES 500,000 back only at maturity in 2047.</p></div>'
+            '<div class="explain-card"><h4>🎯 The small-holder rule — the single biggest finding here</h4>'
+            '<p>CBK\'s prospectuses for your IFB1/2024/8.5 and IFB1/2023/17 both state: <em>"Any amounts '
+            'up to Kshs. 1.0 million per CSD account at amortization will be redeemed in full."</em> Your '
+            'holdings in both (KES 100,000 each) are well under that threshold — so instead of the '
+            'printed multi-tranche schedule, CBK pays you <strong>100% of your principal at the FIRST '
+            'amortization date</strong>, years earlier than the bond\'s advertised final maturity. This is '
+            'reflected throughout this section as each bond\'s "Effective Redemption Date."</p></div>'
+            '<div class="explain-card"><h4>📊 Running Yield vs. Total Return</h4>'
+            '<p><strong>Running yield</strong> is simply your coupon rate (after tax, if taxable) — the '
+            '% of face value you receive every year while you hold the bond. <strong>Total return</strong> '
+            'below is all coupons you\'ll ever receive (past + future, from your purchase date to '
+            'redemption) as a % of what you paid — it is <em>not</em> annualized, and deliberately excludes '
+            'the return of your own principal, which isn\'t profit.</p></div>'
+            '<div class="explain-card"><h4>❓ Why is there no single "current market price"?</h4>'
+            '<p>Kenya\'s secondary bond market doesn\'t publish live retail quotes per bond the way the '
+            'NSE does for shares. Rather than invent one number, the sensitivity table &amp; chart below '
+            'give you the honest tool: look up a recent CBK auction/re-opening yield for a similar tenor, '
+            'find the closest row, and read off a grounded estimate.</p></div>'
+            '</div></div>')
+
+        # ---------- charts ----------
+        chart_html = ''
+        alloc_chart = self._make_bonds_allocation_chart(bonds)
+        cashflow_chart = self._make_bonds_cashflow_chart(bond_portfolio.get('calendar'))
+        sensitivity_series = []
+        try:
+            from bonds_portfolio import bond_price_sensitivity
+            for b in avail:
+                if not b.get('is_matured'):
+                    sensitivity_series.append((b['issue'], bond_price_sensitivity(b)))
+        except Exception as e:
+            logger.warning(f"Bond sensitivity chart skipped: {e}")
+        sensitivity_chart = self._make_bonds_sensitivity_chart(sensitivity_series)
+
+        if cashflow_chart:
+            chart_html += (f'<img src="data:image/png;base64,{cashflow_chart}" class="chart-img" '
+                           'alt="Projected bond cash flow by year">')
+        two_up = ''
+        if alloc_chart:
+            two_up += f'<div><img src="data:image/png;base64,{alloc_chart}" class="chart-img" alt="Bond allocation by face value"></div>'
+        if sensitivity_chart:
+            two_up += f'<div><img src="data:image/png;base64,{sensitivity_chart}" class="chart-img" alt="Value sensitivity to market yield"></div>'
+        if two_up:
+            chart_html += f'<div class="grid-2" style="margin-top:14px;">{two_up}</div>'
+        if chart_html:
+            parts.append(f'<div class="section"><h2>📊 Bond Charts</h2>{chart_html}</div>')
+
+        # ---------- per-bond detail cards ----------
+        cards = ''
+        for b in sorted(avail, key=lambda x: x['face_value'], reverse=True):
+            tax_badge = ('<span class="div-pay">Tax-free (IFB)</span>' if b['tax_free']
+                        else f'<span class="div-unverified">{b["withholding_pct"]:.0f}% withholding tax</span>')
+            accel_note = ''
+            if b['small_holder_accelerated']:
+                accel_note = (
+                    '<p class="eg" style="margin-top:8px;">⚡ <strong>Accelerated:</strong> your '
+                    f'KES {b["face_value"]:,.0f} is below CBK\'s KES 1,000,000 small-holder threshold, so '
+                    f'this bond redeems in full on {b["effective_redemption_date"]} — not at its legal '
+                    f'final maturity of {b["legal_maturity_date"]}.</p>')
+            elif b['legal_maturity_date'] != b['effective_redemption_date']:
+                accel_note = (
+                    f'<p class="eg" style="margin-top:8px;">🧩 Amortizes in tranches — see the schedule '
+                    f'below. Legal final maturity: {b["legal_maturity_date"]}.</p>')
+            ne = b.get('next_event')
+            next_txt = (f'KES {ne["amount"]:,.2f} ({ne["type"]}) on {ne["date"]}' if ne
+                       else 'None — fully redeemed')
+            note_html = f'<p class="eg" style="margin-top:8px;color:#0f766e;">📝 {b["note"]}</p>' if b.get('note') else ''
+            cards += (
+                '<div class="explain-card" style="border-left-color:'
+                + ('#16a34a' if b['tax_free'] else '#2563eb') + ';">'
+                f'<h4>{b["issue"]} <span style="font-weight:400;color:#94a3b8;font-size:0.78rem;">'
+                f'· {b["type_label"]} · {b["tenor_label"]}</span></h4>'
+                f'<p><strong>Face value:</strong> KES {b["face_value"]:,.0f} &nbsp;·&nbsp; '
+                f'<strong>Coupon:</strong> {b["coupon_pct"]:.4f}% &nbsp;·&nbsp; {tax_badge}</p>'
+                f'<p><strong>Next payment:</strong> {next_txt}</p>'
+                f'<p><strong>Accrued interest today:</strong> KES {b["accrued_interest"]:,.2f} '
+                f'({b["days_accrued"]} days since last coupon)</p>'
+                f'<p><strong>Annual income:</strong> KES {b["annual_pretax_income"]:,.0f} pre-tax / '
+                f'KES {b["after_tax_annual_income"]:,.0f} after tax</p>'
+                f'<p><strong>Total return to redemption:</strong> '
+                + (f'{b["total_return_pct"]:+.1f}%' if b["total_return_pct"] is not None else '—')
+                + f' over {b["years_from_purchase_to_redemption"]:.1f} years (not annualized; '
+                'coupons only, excludes return of principal)</p>'
+                f'{accel_note}{note_html}'
+                f'<p class="eg" style="margin-top:8px;"><a href="{b["source_url"]}" target="_blank" '
+                f'rel="noopener" style="color:#3b82f6;">📄 {b["source"]}</a></p>'
+                '</div>')
+        if cards:
+            parts.append(
+                '<div class="section"><h2>📋 Your Bond Holdings — Detail</h2>'
+                f'<div class="explain-grid">{cards}</div></div>')
+
+        # ---------- upcoming 12 months ----------
+        upcoming = bond_portfolio.get('upcoming_12m') or []
+        if upcoming:
+            rows = ''
+            for r in upcoming:
+                parts_txt = []
+                if r['coupon']:
+                    parts_txt.append(f'Coupon KES {r["coupon"]:,.2f}')
+                if r['principal']:
+                    parts_txt.append(f'Principal KES {r["principal"]:,.2f}')
+                rows += (f'<tr><td><strong>{r["date"]}</strong></td><td>{" + ".join(parts_txt)}</td>'
+                        f'<td class="positive">KES {r["total"]:,.2f}</td><td>{", ".join(r["bonds"])}</td></tr>')
+            parts.append(
+                '<div class="section"><h2>📅 Payments Expected in the Next 12 Months</h2>'
+                '<p class="page-intro">Every coupon and principal repayment due across all your bonds, '
+                'soonest first.</p>'
+                '<div class="table-wrap"><table><thead><tr>'
+                '<th>Date</th><th>What</th><th>Total</th><th>Bond(s)</th>'
+                f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+
+        # ---------- full cash-flow schedule per bond ----------
+        for b in sorted(avail, key=lambda x: x['face_value'], reverse=True):
+            all_future = b.get('cashflows_future') or []
+            if not all_future:
+                continue
+            by_date = {}
+            for cf in all_future:
+                by_date.setdefault(cf['date'], {'coupon': 0.0, 'principal': 0.0})
+                by_date[cf['date']][cf['type']] += cf['amount']
+            rows = ''
+            for date_key in sorted(by_date.keys()):
+                v = by_date[date_key]
+                event = []
+                if v['coupon']:
+                    event.append(f'Coupon: KES {v["coupon"]:,.2f}')
+                if v['principal']:
+                    event.append(f'Principal: KES {v["principal"]:,.2f}')
+                total_row = v['coupon'] + v['principal']
+                rows += (f'<tr><td>{date_key}</td><td>{" + ".join(event)}</td>'
+                        f'<td class="positive">KES {total_row:,.2f}</td></tr>')
+            parts.append(
+                f'<div class="section"><h2>🗓️ {b["issue"]} — Full Remaining Cash-Flow Schedule</h2>'
+                f'<p class="page-intro">Every payment left on this bond, from today to '
+                f'{b["effective_redemption_date"]}.</p>'
+                '<div class="table-wrap"><table><thead><tr>'
+                f'<th>Date</th><th>Payment</th><th>Amount</th>'
+                f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+
+        # ---------- price / yield sensitivity table ----------
+        sens_with_rows = [(issue, rows) for issue, rows in sensitivity_series if rows]
+        if sens_with_rows:
+            tables = ''
+            for issue, rows in sens_with_rows:
+                trs = ''
+                for r in rows:
+                    hl = ' style="background:#f0fdf4;font-weight:700;"' if r['is_coupon_yield'] else ''
+                    tag = ' (= this bond\'s coupon)' if r['is_coupon_yield'] else ''
+                    trs += (f'<tr{hl}><td>{r["yield_pct"]:.4f}%{tag}</td>'
+                           f'<td>{r["clean_price_per_100"]:.4f}</td>'
+                           f'<td>{r["dirty_price_per_100"]:.4f}</td>'
+                           f'<td>KES {r["value_for_holding"]:,.2f}</td></tr>')
+                tables += (
+                    f'<div style="margin-bottom:22px;"><h4 style="margin-bottom:8px;">{issue}</h4>'
+                    '<div class="table-wrap"><table><thead><tr>'
+                    '<th>If market yield were...</th><th>Clean price /100</th>'
+                    '<th>Dirty price /100</th><th>Your holding would be worth</th>'
+                    f'</tr></thead><tbody>{trs}</tbody></table></div></div>')
+            parts.append(
+                '<div class="section"><h2>🔍 Price / Yield Sensitivity — Look Up Today\'s Real Value</h2>'
+                '<p class="page-intro">Find a recent Central Bank of Kenya Treasury/Infrastructure bond '
+                'auction result for a <strong>similar remaining tenor</strong> (published at '
+                '<a href="https://www.centralbank.go.ke/bills-bonds/treasury-bonds/" target="_blank" '
+                'rel="noopener" style="color:#3b82f6;">centralbank.go.ke</a> after every auction), and '
+                'find the closest yield row below for an honest, methodology-shown estimate of what your '
+                'holding is worth today — rather than trusting a single invented number. The highlighted '
+                'row is priced at par (100), the standard reference point.</p>'
+                f'{tables}'
+                '<div class="dq-note">Computed with the standard bond-pricing formula (present value of '
+                'remaining coupons + principal, discounted semi-annually) — the same convention CBK '
+                'itself uses in its own prospectus pricing tables. "Clean price" excludes accrued '
+                'interest; "dirty price" (what you\'d actually pay or receive) includes it.</div></div>')
+
+        # ---------- how to add a bond (repeated here for convenience) ----------
+        parts.append(
+            '<div class="section"><h2>➕ Add a New Bond</h2>'
+            '<p class="page-intro">Every time you buy a new bond, or top up an existing one:</p>'
+            '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
+            'overflow-x:auto;font-size:0.85rem;">python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE]\n'
+            'python3 add_bond.py IFB1/2023/6.5 150000\n'
+            'python3 add_bond.py FXD1/2022/025 250000 100.0 2022-09-23</pre>'
+            '<div class="dq-note">Full details, including how the small-holder amortization rule and '
+            'tax treatment are determined, in <code>portfolio/README.md</code> and '
+            '<code>src/bonds_portfolio.py</code>. Nothing here is ever committed to git.</div></div>')
+
+        return ''.join(parts)
+
     def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
                                sector_chart, bullish, bearish, neutral, total,
                                data_date=None, alerts=None, usd_kes=None,
                                portfolio_summary=None, portfolio_history=None,
-                               portfolio_news=None, portfolio_history_tracker=None):
+                               portfolio_news=None, portfolio_history_tracker=None,
+                               bond_portfolio=None):
         """
         Build the multi-page dashboard: a clean Overview plus grouped detail
         pages (Technicals, Fundamentals, Dividends, Sectors, Data Quality).
@@ -3499,10 +3889,13 @@ tr:hover { background: #f8fafc; }
         bonds_body = self._build_bonds_body()
 
         # ---- MY PORTFOLIO page (private — empty state if not set up) ----
+        # Stock holdings first, then bond holdings appended below them —
+        # both live on this one private page, per the same never-committed
+        # portfolio/ directory discipline.
         portfolio_body = self._build_portfolio_body(
             portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
             history_tracker=portfolio_history_tracker,
-        )
+        ) + self._build_bonds_holdings_body(bond_portfolio)
 
         # ---- Assemble & write all pages ----
         pages = {

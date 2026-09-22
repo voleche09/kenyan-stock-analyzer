@@ -1,18 +1,24 @@
 # My Portfolio — private, never committed
 
-This folder holds **your real stock holdings**. It is deliberately kept out of
-git: `portfolio/holdings.json` and `portfolio/history.json` are listed in
-`.gitignore`, so they will never be committed, pushed, or visible to anyone
-you share this repo with. Only this README and `holdings.example.json` are
-tracked in git.
+This folder holds **your real stock and bond holdings**. It is deliberately
+kept out of git: `holdings.json`, `history.json`, `bonds.json` and
+`bonds_history.json` are all listed in `.gitignore`, so they will never be
+committed, pushed, or visible to anyone you share this repo with — including
+in commit history, pull requests, or merge diffs. Only this README and the
+two `*.example.json` templates are tracked in git.
 
 ## Files
 
 | File | Tracked in git? | What it is |
 |---|---|---|
-| `holdings.json` | **No — private** | Your real purchases (symbol, quantity, price paid). Created for you on first setup. |
-| `history.json` | **No — private** | Auto-generated. One snapshot of your total portfolio value per day you run the tool. Powers the daily/weekly/monthly/yearly performance and the value-over-time chart. Never edit this by hand. |
-| `holdings.example.json` | Yes | A template showing the format, with fake data. |
+| `holdings.json` | **No — private** | Your real stock purchases (symbol, quantity, price paid). |
+| `history.json` | **No — private** | Auto-generated stock portfolio value snapshots. Never edit by hand. |
+| `holdings.example.json` | Yes | A template showing the stock format, with fake data. |
+| `bonds.json` | **No — private** | Your real Treasury/Infrastructure bond holdings (issue code, face value, what you paid). See **Bonds** below. |
+| `bonds_history.json` | **No — private** | Reserved for future use (bond values don't need daily snapshots the way stock prices do — a bond's cash flows are already fully known in advance). |
+| `bonds.example.json` | Yes | A template showing the bond format, with fake data. |
+
+## Stocks
 
 ## How to add a stock you just bought
 
@@ -49,19 +55,56 @@ object to the `holdings` array:
 - `buy_date` — `"YYYY-MM-DD"`, or `null` if you don't know/remember it.
 - `note` — anything you want, purely for your own reference.
 
-## Removing or correcting a holding
+## Removing or correcting a stock holding
 
 Open `holdings.json` and delete or edit the relevant lot object. If you've
 sold a stock entirely, remove all of its lots. (This is a holdings tracker,
 not a trade ledger — it doesn't currently record realized gains from sales;
 it only shows what you currently hold.)
 
+## Bonds
+
+Open `portfolio/bonds.json` (create it by copying `bonds.example.json` if it
+doesn't exist yet) and add one object per bond holding to the `bonds` array:
+
+```json
+{"issue": "IFB1/2023/6.5", "face_value": 150000, "purchase_price_pct": 100.0, "purchase_date": "2023-11-13", "note": "optional note"}
+```
+
+- `issue` — the CBK issue code, e.g. `IFB1/2023/6.5`, `FXD1/2022/025`. Must
+  be one of the bonds this dashboard has verified reference data for (see
+  `BOND_REFERENCE` in `src/bonds_portfolio.py` — the coupon rate, full coupon
+  schedule, maturity/redemption structure and tax treatment for each, each
+  one cited against the exact official CBK prospectus it was checked
+  against). An issue code not in that table shows up flagged as
+  "unrecognized" instead of guessed.
+- `face_value` — the KES face (nominal) value you hold — what you'll be
+  repaid at redemption, and what your coupon is calculated on. Not what you
+  paid, unless you bought at exactly par.
+- `purchase_price_pct` — optional, the clean price you paid per KES 100 of
+  face value (e.g. `101.33` if you paid a small premium at a tap sale).
+  Defaults to `100.0` (par) if omitted — this is an assumption, not a fact,
+  so correct it if you know what you actually paid; it only affects your
+  cost basis and total-return %, never the coupon or redemption amounts.
+- `purchase_date` — `"YYYY-MM-DD"`, or `null`/omitted to assume you bought
+  at original issuance.
+- `note` — anything you want, purely for your own reference.
+
+Unlike stocks, a bond's entire future cash-flow schedule (every coupon date
+and amount, and when principal comes back) is fixed and knowable in advance
+— so there's no live price to fetch and no `add_holding.py`-style script;
+just add the fact of what you hold and the dashboard computes everything
+else (accrued interest, next payment, full cash-flow calendar, after-tax
+income, running yield) deterministically.
+
 ## Why nothing is committed to git
 
-Your cost basis and holdings are your private financial information. This
-project can be pushed to GitHub, shared, or open-sourced without ever
-exposing what you own or what you paid for it — the `.gitignore` rule keeps
-`holdings.json` and `history.json` on your machine only.
+Your cost basis and holdings — stocks and bonds — are your private financial
+information. This project can be pushed to GitHub, shared, or open-sourced
+without ever exposing what you own or what you paid for it — the
+`.gitignore` rules keep `holdings.json`, `history.json`, `bonds.json` and
+`bonds_history.json` on your machine only, and out of every commit, PR and
+merge from day one.
 
 If you use the GitHub Actions daily-email workflow and want your portfolio
 included in *that* automated email too (not just when you run the tool
