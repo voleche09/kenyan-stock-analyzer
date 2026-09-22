@@ -418,11 +418,25 @@ class PortfolioHistoryTracker:
 # discipline as market_pulse.py (reuses its exact RSS mechanism).
 # ----------------------------------------------------------------------------
 
-def fetch_portfolio_news(symbols, max_items_per_symbol=4):
+def _parse_pubdate(published_utc):
+    """Parse an RSS pubDate (RFC-822-ish). Returns a datetime, or None if it
+    can't be parsed — callers treat None as "can't verify how old this is"
+    rather than guessing, since a stale date is worse than a missing one."""
+    for fmt in ("%a, %d %b %Y %H:%M:%S %Z", "%a, %d %b %Y %H:%M:%S"):
+        try:
+            return dt.datetime.strptime(published_utc[:25], fmt)
+        except (ValueError, TypeError):
+            continue
+    return None
+
+
+def fetch_portfolio_news(symbols, max_items_per_symbol=4, max_age_days=7):
     """
-    Return [{symbol, title, url, source, published_utc}], newest first.
+    Return [{symbol, title, url, source, published_utc}], newest first,
+    limited to headlines published within the last `max_age_days` days.
     Deliberately NOT sentiment-tagged — see module docstring. Fails safe to
-    [] if the news source is unreachable.
+    [] if the news source is unreachable. A headline whose date can't be
+    parsed is dropped rather than assumed recent.
     """
     if not symbols:
         return []
@@ -438,6 +452,7 @@ def fetch_portfolio_news(symbols, max_items_per_symbol=4):
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
     )}
+    cutoff = dt.datetime.utcnow() - dt.timedelta(days=max_age_days)
     out = []
     for sym in symbols:
         name = SYMBOL_NAMES.get(sym, f"{sym} NSE Kenya")
@@ -448,35 +463,40 @@ def fetch_portfolio_news(symbols, max_items_per_symbol=4):
             if r is None or r.status_code != 200:
                 continue
             items = re.findall(r"<item>(.*?)</item>", r.text, re.S)
-            for raw in items[:max_items_per_symbol]:
+            sym_items = []
+            for raw in items:
                 title_m = re.search(r"<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>", raw, re.S)
                 link_m = re.search(r"<link>(.*?)</link>", raw, re.S)
                 date_m = re.search(r"<pubDate>(.*?)</pubDate>", raw, re.S)
                 src_m = re.search(r"<source[^>]*>(.*?)</source>", raw, re.S)
                 if not (title_m and link_m and date_m):
                     continue
+                published_utc = date_m.group(1).strip()
+                pub_dt = _parse_pubdate(published_utc)
+                if pub_dt is None or pub_dt < cutoff:
+                    continue  # older than the window, or undated — drop it
                 title = unescape((title_m.group(1) or title_m.group(2) or "").strip())
                 title = re.sub(r"\s*-\s*[^-]+$", "", title).strip()
-                out.append({
+                sym_items.append({
                     "symbol": sym,
                     "title": title,
                     "url": link_m.group(1).strip(),
                     "source": unescape(src_m.group(1).strip()) if src_m else "",
-                    "published_utc": date_m.group(1).strip(),
+                    "published_utc": published_utc,
+                    "_pub_dt": pub_dt,
                 })
+            # Keep this symbol's own most-recent items (within the window),
+            # not an arbitrary early slice of Google's raw ordering.
+            sym_items.sort(key=lambda x: x["_pub_dt"], reverse=True)
+            out.extend(sym_items[:max_items_per_symbol])
         except Exception as e:
             logger.debug(f"Portfolio news failed for {sym}: {e}")
 
-    def _parse(x):
-        try:
-            return dt.datetime.strptime(x["published_utc"], "%a, %d %b %Y %H:%M:%S %Z")
-        except Exception:
-            try:
-                return dt.datetime.strptime(x["published_utc"][:25], "%a, %d %b %Y %H:%M:%S")
-            except Exception:
-                return dt.datetime.min
-    out.sort(key=_parse, reverse=True)
-    logger.info(f"Portfolio news: {len(out)} headlines across {len(symbols)} holding(s)")
+    out.sort(key=lambda x: x["_pub_dt"], reverse=True)
+    for item in out:
+        del item["_pub_dt"]
+    logger.info(f"Portfolio news: {len(out)} headline(s) from the last {max_age_days} day(s) "
+               f"across {len(symbols)} holding(s)")
     return out
 
 

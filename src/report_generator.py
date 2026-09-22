@@ -3053,18 +3053,18 @@ tr:hover { background: #f8fafc; }
                     f'<p class="eg" style="color:#94a3b8;">📅 {n.get("published_utc","")}</p></div>')
             parts.append(
                 '<div class="section"><h2>📰 News on Your Holdings</h2>'
-                '<p class="page-intro">Latest headlines mentioning companies you hold, newest first. '
-                '<strong>Shown neutral, on purpose</strong> — reliable automatic positive/negative tagging '
-                'of financial headlines isn\'t possible with free tools (it\'s wrong often enough to be '
-                'dangerous with real money); read the headline and judge for yourself. The "Today" column '
-                'in your holdings table and the TV Signal are the closest real, verified signals this '
-                'dashboard can offer.</p>'
+                '<p class="page-intro">Headlines from the <strong>last 7 days</strong> mentioning companies '
+                'you hold, newest first. <strong>Shown neutral, on purpose</strong> — reliable automatic '
+                'positive/negative tagging of financial headlines isn\'t possible with free tools (it\'s '
+                'wrong often enough to be dangerous with real money); read the headline and judge for '
+                'yourself. The "Today" column in your holdings table and the TV Signal are the closest '
+                'real, verified signals this dashboard can offer.</p>'
                 f'<div class="explain-grid">{cards}</div></div>')
         else:
             parts.append(
                 '<div class="section"><h2>📰 News on Your Holdings</h2>'
-                '<p class="page-intro">No headlines found this run (source may be temporarily unavailable, '
-                'or nothing recent for these companies). Try again next run.</p></div>')
+                '<p class="page-intro">No headlines from the last 7 days for these companies (source may '
+                'be temporarily unavailable, or nothing recent was published). Try again next run.</p></div>')
 
         # ---------- how to add a purchase (repeated here for convenience) ----------
         parts.append(
