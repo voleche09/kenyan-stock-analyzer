@@ -1,0 +1,20 @@
+{
+  "_comment": "This is an EXAMPLE. Your real bond holdings live in portfolio/bonds.json, which is gitignored and never committed. Copy this file to bonds.json and edit it.",
+
+  "bonds": [
+    {
+      "issue": "IFB1/2023/6.5",
+      "face_value": 150000,
+      "purchase_price_pct": 101.33,
+      "purchase_date": "2023-12-11",
+      "note": "Example lot — bought at the December 2023 tap sale, slightly above par"
+    },
+    {
+      "issue": "FXD1/2022/025",
+      "face_value": 350000,
+      "purchase_price_pct": 100.0,
+      "purchase_date": null,
+      "note": "purchase_date and purchase_price_pct are optional — leave price at 100 (par) and date null if you don't remember exactly"
+    }
+  ]
+}

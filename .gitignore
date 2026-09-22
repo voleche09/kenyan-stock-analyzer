@@ -50,3 +50,8 @@ logs/
 # Never committed. Only holdings.example.json and README.md are tracked.
 portfolio/holdings.json
 portfolio/history.json
+
+# Personal bond portfolio — YOUR real Treasury/Infrastructure bond holdings.
+# Never committed. Only bonds.example.json and README.md are tracked.
+portfolio/bonds.json
+portfolio/bonds_history.json
