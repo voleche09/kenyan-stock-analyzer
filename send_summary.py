@@ -168,12 +168,28 @@ def main():
     except Exception as e:
         logger.warning(f"Scoring skipped: {e}")
 
+    # ---- Personal portfolio (private — portfolio/holdings.json, gitignored) ----
+    # Doesn't exist on a fresh GitHub Actions checkout, so this is a silent
+    # no-op there; on your own machine it picks up your real holdings.
+    portfolio_summary = None
+    try:
+        import portfolio as portfolio_mod
+        lots = portfolio_mod.load_holdings(config.portfolio_dir)
+        if lots:
+            portfolio_summary = portfolio_mod.compute_portfolio(
+                lots, analysis_results, fundamentals_data, scores, validations,
+            )
+            portfolio_mod.PortfolioHistoryTracker(config.portfolio_dir).record_snapshot(portfolio_summary)
+    except Exception as e:
+        logger.warning(f"Portfolio tracking skipped: {e}")
+
     # ---- Build the summary PDF ----
     logger.info("Building summary PDF...")
     result = report_gen.generate_summary(
         analysis_results, fundamentals_data=fundamentals_data, validations=validations,
         scores=scores, alerts=alerts, breadth=breadth, sector_data=sector_data,
         usd_kes=usd_kes, watchlist=config.stock_symbols, report_type='both',
+        portfolio_summary=portfolio_summary,
     )
     # result is (html, pdf) for report_type='both', or a single path
     pdf_path = None
@@ -192,7 +208,8 @@ def main():
 
     from email_notifier import EmailNotifier
     notifier = EmailNotifier(config)
-    body = notifier.generate_email_body(analysis_results, sector_data, breadth)
+    body = notifier.generate_email_body(analysis_results, sector_data, breadth,
+                                        portfolio_summary=portfolio_summary)
     attachments = [pdf_path] if pdf_path else []
     if ics_path and os.path.exists(ics_path):
         attachments.append(ics_path)

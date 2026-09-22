@@ -221,6 +221,34 @@ def main():
             except Exception as e:
                 logger.warning(f"History snapshot skipped: {e}")
 
+        # ---- Personal portfolio (private — portfolio/holdings.json, gitignored) ----
+        # Skipped entirely (empty-state page) if the user hasn't set up holdings.
+        portfolio_summary = None
+        portfolio_history_rows = []
+        portfolio_news = []
+        portfolio_history_tracker = None
+        try:
+            import portfolio as portfolio_mod
+            lots = portfolio_mod.load_holdings(config.portfolio_dir)
+            if lots:
+                logger.info(f"Portfolio: {len(lots)} lot(s) across "
+                           f"{len({l['symbol'] for l in lots})} holding(s)")
+                portfolio_summary = portfolio_mod.compute_portfolio(
+                    lots, analysis_results, fundamentals_data, scores, validations,
+                )
+                portfolio_history_tracker = portfolio_mod.PortfolioHistoryTracker(config.portfolio_dir)
+                portfolio_history_tracker.record_snapshot(portfolio_summary)
+                portfolio_history_rows = portfolio_history_tracker.load_history()
+                held_symbols = sorted({h['symbol'] for h in portfolio_summary['holdings']})
+                portfolio_news = portfolio_mod.fetch_portfolio_news(held_symbols)
+                if portfolio_summary['missing_symbols']:
+                    logger.warning(
+                        f"Portfolio: no live data today for "
+                        f"{', '.join(portfolio_summary['missing_symbols'])}"
+                    )
+        except Exception as e:
+            logger.warning(f"Portfolio tracking skipped: {e}")
+
         # ---- Individual reports (only if --detailed) ----
         report_files = {}
         if args.detailed:
@@ -275,6 +303,10 @@ def main():
             scores=scores,
             alerts=alerts,
             usd_kes=usd_kes,
+            portfolio_summary=portfolio_summary,
+            portfolio_history=portfolio_history_rows,
+            portfolio_news=portfolio_news,
+            portfolio_history_tracker=portfolio_history_tracker,
         )
 
         # ---- Email ----
@@ -283,7 +315,10 @@ def main():
             try:
                 from email_notifier import EmailNotifier
                 notifier = EmailNotifier(config)
-                body = notifier.generate_email_body(analysis_results, sector_data, breadth)
+                body = notifier.generate_email_body(
+                    analysis_results, sector_data, breadth,
+                    portfolio_summary=portfolio_summary,
+                )
                 notifier.send_report(
                     f"NSE Daily Report — {analysis_date.strftime('%Y-%m-%d')}",
                     body,

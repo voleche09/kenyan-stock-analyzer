@@ -45,3 +45,8 @@ logs/
 # PDF/Excel output
 *.pdf
 *.xlsx
+
+# Personal stock portfolio — YOUR real holdings and cost basis.
+# Never committed. Only holdings.example.json and README.md are tracked.
+portfolio/holdings.json
+portfolio/history.json

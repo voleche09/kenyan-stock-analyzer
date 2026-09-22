@@ -1,0 +1,27 @@
+{
+  "_comment": "This is an EXAMPLE. Your real holdings live in portfolio/holdings.json, which is gitignored and never committed. Copy this file to holdings.json and edit it, or run:  python3 add_holding.py SYMBOL QUANTITY BUY_PRICE [BUY_DATE]",
+
+  "holdings": [
+    {
+      "symbol": "SCOM",
+      "quantity": 1000,
+      "buy_price": 23.50,
+      "buy_date": "2026-03-14",
+      "note": "Example lot — bought via Genghis Capital"
+    },
+    {
+      "symbol": "SCOM",
+      "quantity": 500,
+      "buy_price": 26.00,
+      "buy_date": "2026-07-02",
+      "note": "Example — topped up after the H1 results"
+    },
+    {
+      "symbol": "KCB",
+      "quantity": 800,
+      "buy_price": 44.00,
+      "buy_date": null,
+      "note": "buy_date is optional — leave it null if you don't remember exactly when you bought"
+    }
+  ]
+}
