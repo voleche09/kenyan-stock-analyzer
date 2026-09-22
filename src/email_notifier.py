@@ -121,8 +121,61 @@ class EmailNotifier:
             logger.error(f"Failed to send email: {e}")
             return False
 
+    @staticmethod
+    def _portfolio_email_section(portfolio_summary):
+        """
+        Compact "My Portfolio" block for the daily email. Returns "" if the
+        user has no private holdings set up (nothing is shown, no mention of
+        a missing feature — the email just looks like it always has).
+        """
+        if not portfolio_summary:
+            return ""
+        t = portfolio_summary["totals"]
+        gain_cls = "bullish" if (t.get("gain") or 0) >= 0 else "bearish"
+        day_cls = "bullish" if (t.get("day_change_pct") or 0) >= 0 else "bearish"
+
+        rows = ""
+        for h in sorted(portfolio_summary["holdings"],
+                        key=lambda x: (x.get("market_value") or -1), reverse=True):
+            if not h["data_available"]:
+                rows += (f'<tr><td><b>{h["symbol"]}</b></td>'
+                         f'<td colspan="4" style="color:#dc2626;">No live data today</td></tr>')
+                continue
+            gcls = "bullish" if h["gain_pct"] >= 0 else "bearish"
+            dcls = "bullish" if (h.get("day_change_pct") or 0) >= 0 else "bearish"
+            day_txt = f'{h["day_change_pct"]:+.2f}%' if h.get("day_change_pct") is not None else "—"
+            rows += (
+                f'<tr><td><b>{h["symbol"]}</b></td>'
+                f'<td>{h["price"]:.2f}</td>'
+                f'<td>{h["market_value"]:,.0f}</td>'
+                f'<td class="{gcls}">{h["gain_pct"]:+.1f}%</td>'
+                f'<td class="{dcls}">{day_txt}</td></tr>'
+            )
+
+        missing_note = ""
+        if portfolio_summary.get("missing_symbols"):
+            missing_note = (f'<p style="font-size:0.8rem;color:#dc2626;">No live data today for: '
+                            f'{", ".join(portfolio_summary["missing_symbols"])} — excluded from totals.</p>')
+
+        return f"""
+    <h2>💼 My Portfolio</h2>
+    <div class="stats">
+        <div class="stat"><div class="big">{t['cost_basis']:,.0f}</div><div class="label">Cost Basis (KES)</div></div>
+        <div class="stat"><div class="big">{t['market_value']:,.0f}</div><div class="label">Value Today (KES)</div></div>
+        <div class="stat"><div class="big {gain_cls}">{t['gain']:+,.0f}</div><div class="label">Gain/Loss ({t.get('gain_pct', 0):+.1f}%)</div></div>
+        <div class="stat"><div class="big {day_cls}">{(f"{t['day_change_pct']:+.2f}%" if t.get('day_change_pct') is not None else '—')}</div><div class="label">Today</div></div>
+    </div>
+    {missing_note}
+    <table>
+        <tr><th>Symbol</th><th>Price</th><th>Value (KES)</th><th>Gain %</th><th>Today</th></tr>
+        {rows}
+    </table>
+    <p style="font-size:0.75rem;color:#94a3b8;">Full breakdown, charts, dividends and news on your holdings:
+    open the dashboard's 💼 My Portfolio tab. Not financial advice.</p>
+"""
+
     def generate_email_body(self, analysis_results, sector_data=None,
-                            breadth=None):
+                            breadth=None, portfolio_summary=None):
         """
         Generate a compact HTML email body with market summary.
 
@@ -130,6 +183,10 @@ class EmailNotifier:
             analysis_results: dict from AnalysisEngine.
             sector_data: dict from SectorAnalyzer.
             breadth: dict from AnalysisEngine.calculate_market_breadth.
+            portfolio_summary: optional dict from portfolio.compute_portfolio().
+                If given, a "My Portfolio" section is added near the top.
+                Never fetched or loaded by this module — the caller decides
+                whether the user's private holdings exist and passes them in.
 
         Returns:
             HTML string suitable for email clients.
@@ -203,7 +260,7 @@ class EmailNotifier:
             <div class="label">Sectors</div>
         </div>
     </div>
-"""
+{self._portfolio_email_section(portfolio_summary)}"""
         # Market breadth
         if breadth:
             html += """

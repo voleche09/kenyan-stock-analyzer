@@ -773,7 +773,7 @@ class ReportGenerator:
     def generate_summary(self, analysis_results, fundamentals_data=None,
                          validations=None, scores=None, alerts=None,
                          breadth=None, sector_data=None, usd_kes=None,
-                         watchlist=None, report_type='pdf'):
+                         watchlist=None, report_type='pdf', portfolio_summary=None):
         """
         Build a compact, one-page summary of key metrics and render it to PDF
         (and/or HTML). Designed for a daily email — a subset of the dashboard.
@@ -883,18 +883,53 @@ class ReportGenerator:
             if shown >= 14:
                 break
 
+        # ---- My Portfolio (private — compact block, only if holdings exist) ----
+        portfolio_block = self._build_summary_portfolio_block(portfolio_summary)
+
         html = self._build_summary_html(
             now=now, fx_str=fx_str, total=total, bullish=bullish, bearish=bearish,
             v_ok=v_ok, v_mis=v_mis, v_stale=v_stale, breadth=breadth,
             wl_rows=wl_rows, movers_rows=movers_rows, exdiv_rows=exdiv_rows,
-            alert_items=alert_items,
+            alert_items=alert_items, portfolio_block=portfolio_block,
         )
         return self._save_report('nse_summary', html, report_type)
 
     @staticmethod
+    def _build_summary_portfolio_block(portfolio_summary):
+        """Compact 'My Portfolio' block for the one-page PDF summary. '' if
+        the user has no private holdings set up."""
+        if not portfolio_summary:
+            return ''
+        t = portfolio_summary['totals']
+        gcls = 'g' if (t.get('gain') or 0) >= 0 else 'r'
+        dcls = 'g' if (t.get('day_change_pct') or 0) >= 0 else 'r'
+        rows = ''
+        for h in sorted(portfolio_summary['holdings'],
+                        key=lambda x: (x.get('market_value') or -1), reverse=True):
+            if not h['data_available']:
+                rows += f'<tr><td><b>{h["symbol"]}</b></td><td colspan="4" class="r">No live data today</td></tr>'
+                continue
+            hc = 'g' if h['gain_pct'] >= 0 else 'r'
+            dc = 'g' if (h.get('day_change_pct') or 0) >= 0 else 'r'
+            day_txt = f'{h["day_change_pct"]:+.2f}%' if h.get('day_change_pct') is not None else '—'
+            rows += (f'<tr><td><b>{h["symbol"]}</b></td><td>{h["price"]:.2f}</td>'
+                     f'<td>{h["market_value"]:,.0f}</td>'
+                     f'<td class="{hc}">{h["gain_pct"]:+.1f}%</td>'
+                     f'<td class="{dc}">{day_txt}</td></tr>')
+        return f'''<h2>💼 My Portfolio</h2>
+<div class="pills">
+  <span class="pill"><b>{t['cost_basis']:,.0f}</b> cost (KES)</span>
+  <span class="pill"><b>{t['market_value']:,.0f}</b> value (KES)</span>
+  <span class="pill {gcls}"><b>{t['gain']:+,.0f}</b> gain ({t.get('gain_pct', 0):+.1f}%)</span>
+  <span class="pill {dcls}"><b>{(f"{t['day_change_pct']:+.2f}%" if t.get('day_change_pct') is not None else '—')}</b> today</span>
+</div>
+<table><thead><tr><th>Symbol</th><th>Price</th><th>Value (KES)</th><th>Gain %</th><th>Today</th></tr></thead>
+<tbody>{rows}</tbody></table>'''
+
+    @staticmethod
     def _build_summary_html(now, fx_str, total, bullish, bearish, v_ok, v_mis,
                             v_stale, breadth, wl_rows, movers_rows, exdiv_rows,
-                            alert_items):
+                            alert_items, portfolio_block=''):
         breadth = breadth or {}
         breadth_str = ' · '.join(
             f"{lbl} {breadth[k]}%" for k, lbl in
@@ -930,6 +965,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
   <span class="pill a"><b>{v_stale}</b> stale</span>
 </div>
 {f'<div class="sub">Breadth: {breadth_str}</div>' if breadth_str else ''}
+{portfolio_block}
 <h2>⭐ Watchlist</h2>
 <table><thead><tr><th>Symbol</th><th>TV Signal</th><th>Price</th><th>Change</th><th>Yield</th><th>Score</th></tr></thead>
 <tbody>{wl_rows}</tbody></table>
@@ -947,7 +983,9 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
 
     def generate_index(self, analysis_results, sector_data=None, breadth=None,
                        report_files=None, fundamentals_data=None,
-                       validations=None, scores=None, alerts=None, usd_kes=None):
+                       validations=None, scores=None, alerts=None, usd_kes=None,
+                       portfolio_summary=None, portfolio_history=None, portfolio_news=None,
+                       portfolio_history_tracker=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -1057,17 +1095,30 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                     data_date = f['_data_date']
                     break
 
+        # Link each held stock to its detailed report, if one was generated
+        # this run (--detailed). Copies the holdings list rather than
+        # mutating the caller's portfolio_summary in place.
+        if portfolio_summary and report_files:
+            portfolio_summary = dict(portfolio_summary)
+            portfolio_summary['holdings'] = [
+                {**h, 'report_file': report_files.get(h['symbol'], '')}
+                for h in portfolio_summary['holdings']
+            ]
+
         index_path = self._build_dashboard_pages(
             stocks=stocks, gainers=gainers, losers=losers, sectors=sector_data,
             breadth=breadth, sector_chart=sector_chart, bullish=bullish,
             bearish=bearish, neutral=neutral, total=len(stocks),
             data_date=data_date, alerts=alerts, usd_kes=usd_kes,
+            portfolio_summary=portfolio_summary, portfolio_history=portfolio_history,
+            portfolio_news=portfolio_news, portfolio_history_tracker=portfolio_history_tracker,
         )
         return index_path
 
     # Navigation across the dashboard pages (filename, label).
     _NAV = [
         ('index.html', '🏠 Overview'),
+        ('portfolio.html', '💼 My Portfolio'),
         ('visuals.html', '🗺️ Visuals'),
         ('technicals.html', '📈 Technicals'),
         ('fundamentals.html', '💰 Fundamentals'),
@@ -1179,6 +1230,7 @@ tr:hover { background: #f8fafc; }
 .mcap-cell { font-size: 0.8rem; color: #475569; }
 .positive { color: #22c55e; font-weight: 600; }
 .negative { color: #ef4444; font-weight: 600; }
+.midv { color: #d97706; font-weight: 600; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
 .sector-card { background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; }
@@ -2608,9 +2660,431 @@ tr:hover { background: #f8fafc; }
             + self._build_market_snapshot(stocks)
             + self._build_most_active(stocks))
 
+    # ==================================================================
+    # MY PORTFOLIO — private holdings tracker (charts + page)
+    # ==================================================================
+    def _make_portfolio_allocation_chart(self, sector_allocation):
+        """Donut chart: portfolio market value by sector."""
+        if not sector_allocation:
+            return None
+        items = sorted(sector_allocation.items(), key=lambda kv: kv[1], reverse=True)
+        labels = [k for k, _ in items]
+        values = [v for _, v in items]
+        palette = ['#2563eb', '#16a34a', '#f59e0b', '#8b5cf6', '#ef4444',
+                  '#0ea5e9', '#ec4899', '#84cc16', '#64748b']
+        colors = [palette[i % len(palette)] for i in range(len(items))]
+        fig, ax = plt.subplots(figsize=(6.2, 5.4))
+        wedges, _, autotexts = ax.pie(
+            values, labels=None, autopct=lambda p: f'{p:.0f}%' if p >= 4 else '',
+            startangle=90, colors=colors, pctdistance=0.78,
+            wedgeprops=dict(width=0.42, edgecolor='white', linewidth=2))
+        for t in autotexts:
+            t.set_fontsize(9); t.set_fontweight('bold'); t.set_color('white')
+        total = sum(values)
+        ax.text(0, 0, f"KES\n{total/1e6:.2f}M", ha='center', va='center',
+                fontsize=13, fontweight='bold')
+        ax.legend(wedges, [f'{l} ({v/total*100:.0f}%)' for l, v in items],
+                  loc='center left', bbox_to_anchor=(1.0, 0.5), fontsize=9, frameon=False)
+        ax.set_title('Portfolio by Sector', fontsize=13, fontweight='bold')
+        return self._fig_to_b64()
+
+    def _make_portfolio_gainloss_chart(self, holdings):
+        """Horizontal bar: unrealized gain/loss % per holding, green/red."""
+        avail = [h for h in holdings if h.get('data_available') and h.get('gain_pct') is not None]
+        if not avail:
+            return None
+        avail = sorted(avail, key=lambda h: h['gain_pct'])
+        syms = [h['symbol'] for h in avail]
+        pcts = [h['gain_pct'] for h in avail]
+        colors = [COLORS['bullish'] if p >= 0 else COLORS['bearish'] for p in pcts]
+        fig, ax = plt.subplots(figsize=(9, max(3, 0.55 * len(avail))))
+        bars = ax.barh(syms, pcts, color=colors, alpha=0.88)
+        for bar, val in zip(bars, pcts):
+            ax.text(bar.get_width() + (1 if val >= 0 else -1),
+                    bar.get_y() + bar.get_height() / 2, f'{val:+.1f}%',
+                    va='center', ha='left' if val >= 0 else 'right',
+                    fontsize=9, fontweight='bold',
+                    color='#166534' if val >= 0 else '#991b1b')
+        ax.axvline(x=0, color='#334155', linewidth=0.8)
+        ax.set_title('Unrealized Gain / Loss by Holding (%)', fontsize=13, fontweight='bold')
+        ax.set_xlabel('% since your average cost')
+        ax.grid(True, alpha=0.3, axis='x')
+        return self._fig_to_b64()
+
+    def _make_portfolio_weight_chart(self, holdings):
+        """Horizontal bar: each holding's weight (% of total market value)."""
+        avail = [h for h in holdings if h.get('data_available') and h.get('market_value')]
+        if not avail:
+            return None
+        total = sum(h['market_value'] for h in avail)
+        if not total:
+            return None
+        avail = sorted(avail, key=lambda h: h['market_value'])
+        syms = [h['symbol'] for h in avail]
+        weights = [h['market_value'] / total * 100 for h in avail]
+        fig, ax = plt.subplots(figsize=(9, max(3, 0.55 * len(avail))))
+        bars = ax.barh(syms, weights, color=COLORS['price'], alpha=0.85)
+        for bar, val, h in zip(bars, weights, avail):
+            ax.text(bar.get_width() + 0.4, bar.get_y() + bar.get_height() / 2,
+                    f'{val:.1f}%  (KES {h["market_value"]:,.0f})',
+                    va='center', fontsize=8.5, color='#1e293b')
+        ax.set_title('Portfolio Weight by Holding', fontsize=13, fontweight='bold')
+        ax.set_xlabel('% of total portfolio market value')
+        ax.grid(True, alpha=0.3, axis='x')
+        ax.set_xlim(0, max(weights) * 1.35)
+        return self._fig_to_b64()
+
+    def _make_portfolio_value_chart(self, history_rows, cost_basis=None):
+        """
+        Line chart of total portfolio market value over time, from REAL
+        recorded daily snapshots only (portfolio/history.json) — never
+        interpolated. Returns None if fewer than 2 days are recorded yet.
+        """
+        if not history_rows or len(history_rows) < 2:
+            return None
+        dates = [r['date'] for r in history_rows]
+        values = [r['market_value'] for r in history_rows]
+        fig, ax = plt.subplots(figsize=(11, 4.2))
+        ax.plot(dates, values, marker='o', markersize=4, color=COLORS['price'],
+                linewidth=1.8, label='Portfolio market value')
+        ax.fill_between(range(len(dates)), values, alpha=0.08, color=COLORS['price'])
+        if cost_basis:
+            ax.axhline(y=cost_basis, color=COLORS['sma50'], linestyle='--', linewidth=1.2,
+                       label=f'Your cost basis (KES {cost_basis:,.0f})')
+        ax.set_title('Portfolio Value Over Time (recorded each day you run the tool)',
+                     fontsize=13, fontweight='bold')
+        ax.set_ylabel('KES')
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(
+            lambda x, p: f'{x/1e6:.2f}M' if abs(x) >= 1e6 else f'{x/1e3:.0f}K'))
+        ax.legend(loc='upper left', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        step = max(1, len(dates) // 12)
+        ax.set_xticks(range(0, len(dates), step))
+        ax.set_xticklabels([dates[i] for i in range(0, len(dates), step)], rotation=30, ha='right')
+        return self._fig_to_b64()
+
+    def _portfolio_holding_tip(self, h):
+        """Rich hover preview for one portfolio holding — cost, live value,
+        gain, dividend, and the same transparent score breakdown used
+        elsewhere on the dashboard. Escaped for a data-tip="" attribute."""
+        if not h.get('data_available'):
+            html = (f"<div class='tt-h'><span>{h['symbol']}</span>"
+                    f"<span style='color:#f87171'>no data today</span></div>"
+                    f"<div class='tt-sub'>{h['quantity']:g} shares @ avg KES {h['avg_cost']:.2f} "
+                    f"(cost KES {h['cost_basis']:,.0f})</div>"
+                    "<div class='tt-note'>This stock had no live price in today's data pull — "
+                    "showing your cost basis only. Try again after the next run.</div>")
+            return html.replace("&", "&amp;").replace('"', "&quot;")
+
+        gp = h.get('gain_pct')
+        gc = '#4ade80' if (gp or 0) >= 0 else '#f87171'
+        p = [
+            f"<div class='tt-h'><span>{h['symbol']}</span>"
+            f"<span style='color:{gc}'>{gp:+.1f}%</span></div>",
+            f"<div class='tt-sub'>{h['quantity']:g} shares · avg cost KES {h['avg_cost']:.2f} "
+            f"· now KES {h['price']:.2f}</div>",
+            f"<div class='tt-row'><span class='tt-k'>Cost basis</span><span>KES {h['cost_basis']:,.0f}</span></div>",
+            f"<div class='tt-row'><span class='tt-k'>Market value</span><span>KES {h['market_value']:,.0f}</span></div>",
+            f"<div class='tt-row'><span class='tt-k'>Gain / loss</span>"
+            f"<span style='color:{gc}'>KES {h['gain']:+,.0f}</span></div>",
+        ]
+        if h.get('day_change_pct') is not None:
+            dc = '#4ade80' if h['day_change_pct'] >= 0 else '#f87171'
+            p.append(f"<div class='tt-row'><span class='tt-k'>Today</span>"
+                     f"<span style='color:{dc}'>{h['day_change_pct']:+.2f}%</span></div>")
+        if h.get('dps_fy'):
+            p.append(f"<div class='tt-row'><span class='tt-k'>Est. annual dividend</span>"
+                     f"<span>KES {(h.get('est_annual_dividend') or 0):,.0f}</span></div>")
+        if h.get('score') is not None:
+            oc = '#22c55e' if h['score'] >= 70 else '#f59e0b' if h['score'] >= 45 else '#ef4444'
+            p.append(f"<div class='tt-row'><span class='tt-k'>Factor score</span>"
+                     f"<span style='color:{oc};font-weight:800'>{h['score']}/100</span></div>")
+            reasons = (h.get('score_detail') or {}).get('reasons') or {}
+            allr = []
+            for key in ('value', 'quality', 'momentum', 'dividend', 'liquidity'):
+                allr += (reasons.get(key) or [])
+            if allr:
+                p.append(f"<div class='tt-note'>Why: {' · '.join(allr[:5])}</div>")
+        p.append(f"<div class='tt-note'>{h['tv_signal_label']} — TradingView's technical rating, "
+                 "the same one shown throughout this dashboard. Not personalized advice.</div>")
+        return "".join(p).replace("&", "&amp;").replace('"', "&quot;")
+
+    def _build_portfolio_body(self, portfolio_summary, history_rows=None, news=None,
+                              history_tracker=None):
+        """
+        My Portfolio page — your real holdings, computed live from the exact
+        same verified data used everywhere else on this dashboard. Nothing
+        here is investment advice; the TV Signal / score shown per holding is
+        the same transparent, mechanical screen used dashboard-wide.
+        """
+        history_rows = history_rows or []
+        news = news or []
+
+        # ---------- empty state: no holdings.json yet ----------
+        if not portfolio_summary:
+            return (
+                '<div class="section"><h2>💼 My Portfolio</h2>'
+                '<p class="page-intro">You haven\'t added any holdings yet. This page is 100% private — '
+                'your holdings live in <code>portfolio/holdings.json</code> on your own machine and are '
+                '<strong>never committed to git</strong>.</p>'
+                '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
+                '<strong>Add your first purchase — two ways:</strong>'
+                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
+                'overflow-x:auto;font-size:0.85rem;">python3 add_holding.py SCOM 500 34.50</pre>'
+                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/holdings.json</code> directly — '
+                'see <code>portfolio/README.md</code> for the exact format.</p>'
+                '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this page fills in: '
+                'live value, gain/loss, dividends, sector allocation, charts, news on your holdings, '
+                'and daily/weekly/monthly/yearly performance as history builds up.</p>'
+                '</div></div>')
+
+        parts = []
+        t = portfolio_summary['totals']
+        holdings = portfolio_summary['holdings']
+        as_of = portfolio_summary.get('as_of', '')
+
+        # ---------- disclaimer ----------
+        parts.append(
+            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
+            'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
+            '⚠️ <strong>Your private portfolio — educational information, not financial advice.</strong> '
+            'Values are computed fresh every run from the same verified prices and fundamentals used '
+            'throughout this dashboard. The "TV Signal" and "Score" per holding are the same transparent, '
+            'mechanical screens shown dashboard-wide — not a personalized buy/sell recommendation. '
+            'This file is never committed to git; see <code>portfolio/README.md</code>.</div>')
+
+        # ---------- missing-data warning ----------
+        missing = portfolio_summary.get('missing_symbols') or []
+        if missing:
+            parts.append(
+                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
+                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                f'⚠️ <strong>No live data today for: {", ".join(missing)}.</strong> '
+                'These holdings are excluded from the totals below rather than shown with a guessed '
+                'price. Try running the pipeline again — this is usually a temporary gap in the day\'s '
+                'data pull.</div>')
+
+        # ---------- hero totals ----------
+        gp = t.get('gain_pct')
+        gain_cls = 'positive' if (gp or 0) >= 0 else 'negative'
+        dp = t.get('day_change_pct')
+        day_cls = 'positive' if (dp or 0) >= 0 else 'negative'
+        parts.append(
+            '<div class="section"><h2>💼 My Portfolio</h2>'
+            f'<p class="page-intro">As of {as_of} · {t["n_available"]} of {t["n_holdings"]} holding(s) '
+            'priced today.</p>'
+            '<div class="stats">'
+            f'<div class="stat-card"><div class="stat-value">KES {t["cost_basis"]:,.0f}</div>'
+            '<div class="stat-label">Total Cost Basis</div></div>'
+            f'<div class="stat-card"><div class="stat-value">KES {t["market_value"]:,.0f}</div>'
+            '<div class="stat-label">Market Value Today</div></div>'
+            f'<div class="stat-card"><div class="stat-value {gain_cls}">'
+            f'{"+" if (t["gain"] or 0) >= 0 else ""}KES {t["gain"]:,.0f}</div>'
+            f'<div class="stat-label">Total Gain / Loss'
+            + (f' ({gp:+.1f}%)' if gp is not None else '') + '</div></div>'
+            f'<div class="stat-card"><div class="stat-value {day_cls}">'
+            + (f'{dp:+.2f}%' if dp is not None else '—') + '</div>'
+            f'<div class="stat-label">Today' + (f' (KES {t["day_change_value"]:+,.0f})' if t.get("day_change_value") is not None else '') + '</div></div>'
+            f'<div class="stat-card"><div class="stat-value">KES {t["est_annual_dividend"]:,.0f}</div>'
+            '<div class="stat-label">Est. Annual Dividend</div></div>'
+            f'<div class="stat-card"><div class="stat-value positive">'
+            + (f'{t["total_return_incl_div_pct"]:+.1f}%' if t.get("total_return_incl_div_pct") is not None else '—') + '</div>'
+            '<div class="stat-label">Total Return incl. Dividend</div></div>'
+            '</div>'
+            '<div class="dq-note">"Total Return incl. Dividend" = your unrealized price gain % + this '
+            "year's declared dividend yield on your cost. It assumes the full declared dividend is paid — "
+            'an indicative estimate, not a record of dividends actually received.</div></div>')
+
+        # ---------- daily / weekly / monthly / yearly ----------
+        if history_tracker is not None:
+            windows = [('1 Day', 1), ('1 Week', 7), ('1 Month', 30), ('1 Year', 365)]
+            cards = ''
+            for label, days in windows:
+                lb = history_tracker.lookback(t['market_value'], days)
+                if lb:
+                    cls = 'positive' if lb['pct_change'] >= 0 else 'negative'
+                    cards += (
+                        '<div class="stat-card">'
+                        f'<div class="stat-value {cls}">{lb["pct_change"]:+.1f}%</div>'
+                        f'<div class="stat-label">{label}</div>'
+                        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">'
+                        f'since {lb["from_date"]} · KES {lb["change_value"]:+,.0f}</div></div>')
+                else:
+                    cards += (
+                        '<div class="stat-card">'
+                        '<div class="stat-value" style="color:#cbd5e1;font-size:1.1rem;">—</div>'
+                        f'<div class="stat-label">{label}</div>'
+                        '<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">not enough history yet</div></div>')
+            days_tracked = history_tracker.days_recorded()
+            first_date = history_tracker.first_date()
+            parts.append(
+                '<div class="section"><h2>📅 Performance Over Time</h2>'
+                '<p class="page-intro">Computed from real snapshots recorded each day you run this tool'
+                + (f' — tracking since {first_date} ({days_tracked} day(s) recorded so far).'
+                   if first_date else '.') +
+                ' A window shows "not enough history yet" rather than a guess when there isn\'t a real '
+                'snapshot that far back.</p>'
+                f'<div class="stats">{cards}</div></div>')
+
+        # ---------- charts ----------
+        chart_html = ''
+        alloc_chart = self._make_portfolio_allocation_chart(portfolio_summary.get('sector_allocation'))
+        gainloss_chart = self._make_portfolio_gainloss_chart(holdings)
+        weight_chart = self._make_portfolio_weight_chart(holdings)
+        value_chart = self._make_portfolio_value_chart(history_rows, cost_basis=t.get('cost_basis'))
+        if value_chart:
+            chart_html += (f'<img src="data:image/png;base64,{value_chart}" class="chart-img" '
+                           'alt="Portfolio value over time">')
+        else:
+            chart_html += (
+                '<div class="dq-note" style="margin-bottom:14px;">📈 Portfolio value chart will appear '
+                'once you\'ve run this tool on at least 2 different days — building real history, not a '
+                'guess.</div>')
+        two_up = ''
+        if alloc_chart:
+            two_up += f'<div><img src="data:image/png;base64,{alloc_chart}" class="chart-img" alt="Sector allocation"></div>'
+        if gainloss_chart:
+            two_up += f'<div><img src="data:image/png;base64,{gainloss_chart}" class="chart-img" alt="Gain/loss by holding"></div>'
+        if two_up:
+            chart_html += f'<div class="grid-2" style="margin-top:14px;">{two_up}</div>'
+        if weight_chart:
+            chart_html += (f'<img src="data:image/png;base64,{weight_chart}" class="chart-img" '
+                           'style="margin-top:14px;" alt="Portfolio weight by holding">')
+        parts.append(f'<div class="section"><h2>📊 Portfolio Charts</h2>{chart_html}</div>')
+
+        # ---------- holdings table (sortable — click any header) ----------
+        rows = ''
+        for h in sorted(holdings, key=lambda x: (x['market_value'] or -1), reverse=True):
+            link = h.get('report_file') or '#'
+            tip = self._portfolio_holding_tip(h)
+            if not h['data_available']:
+                rows += (
+                    f'<tr data-tip="{tip}" style="opacity:0.55;">'
+                    f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                    f'<td>{h["quantity"]:,.0f}</td><td>{h["avg_cost"]:.2f}</td>'
+                    '<td colspan="9" style="color:#dc2626;">No live data today — see warning above</td></tr>')
+                continue
+            gp2 = h['gain_pct']
+            gcls = 'positive' if gp2 >= 0 else 'negative'
+            dcls = 'positive' if (h.get('day_change_pct') or 0) >= 0 else 'negative'
+            roe_v = h.get('roe')
+            roe_cls = self._fund_color('roe', roe_v) if roe_v is not None else ''
+            roe_txt = f'{roe_v:.1f}%' if roe_v is not None else 'N/A'
+            sc = h.get('score')
+            sc_cls = 'score-high' if (sc or 0) >= 70 else 'score-mid' if (sc or 0) >= 45 else 'score-low'
+            sc_html = f'<span class="score {sc_cls} hint">{sc}</span>' if sc is not None else '—'
+            dy = h.get('dividend_yield')
+            dy_txt = f'{dy:.1f}%' if dy is not None else '—'
+            rows += (
+                f'<tr data-tip="{tip}">'
+                f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                f'<td>{h["quantity"]:,.0f}</td>'
+                f'<td>{h["avg_cost"]:.2f}</td>'
+                f'<td>{h["price"]:.2f}</td>'
+                f'<td>{h["market_value"]:,.0f}</td>'
+                f'<td class="{gcls}">{h["gain"]:+,.0f}</td>'
+                f'<td class="{gcls}">{gp2:+.1f}%</td>'
+                f'<td class="{dcls}">' + (f'{h["day_change_pct"]:+.2f}%' if h.get('day_change_pct') is not None else '—') + '</td>'
+                f'<td class="{roe_cls}">{roe_txt}</td>'
+                f'<td>{dy_txt}</td>'
+                f'<td><span class="badge {h["tv_signal_class"]}">{h["tv_signal_label"]}</span></td>'
+                f'<td>{sc_html}</td></tr>')
+        sort_th = lambda label, typ='number', title='': (
+            f'<th class="sortable" data-sort-type="{typ}" onclick="sortTable(this)"'
+            + (f' title="{title}"' if title else '') + f'>{label}</th>')
+        parts.append(
+            '<div class="section"><h2>📋 Your Holdings</h2>'
+            '<p class="dq-note" style="margin-bottom:12px;">💡 Click any column header to sort. Hover a '
+            'row for the full breakdown behind its score. "ROE" is the company\'s own Return on Equity '
+            '(green ≥15%, red &lt;5%) — a company-quality metric, not your personal return (that\'s the '
+            '"Gain %" column).</p>'
+            '<div class="table-wrap"><table id="mainTable"><thead><tr>'
+            + sort_th('Symbol', 'text') + sort_th('Qty') + sort_th('Avg Cost')
+            + sort_th('Price') + sort_th('Value (KES)') + sort_th('Gain (KES)')
+            + sort_th('Gain %') + sort_th('Today') + sort_th('Company ROE', 'number', 'Return on Equity — how efficiently the company uses shareholder capital. Not your personal return.')
+            + sort_th('Div Yield') + sort_th('TV Signal', 'signal', 'TradingView technical rating')
+            + sort_th('Score', 'number', '0-100 transparent factor screen — hover for the breakdown')
+            + f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+
+        # ---------- dividend detail ----------
+        div_rows = ''
+        for h in sorted(holdings, key=lambda x: (x.get('est_annual_dividend') or 0), reverse=True):
+            if not h['data_available']:
+                continue
+            status = h.get('dividend_status')
+            if h.get('dps_fy') and h['dps_fy'] > 0:
+                badge = '<span class="div-pay">Pays dividend</span>' if status != 'unverified' else '<span class="div-unverified">Unverified</span>'
+            else:
+                badge = '<span class="div-zero">0 — none declared</span>'
+            ex = h.get('dividend_ex_date')
+            if ex:
+                ex_html = (f'<span class="exdate-upcoming">{ex} (upcoming)</span>' if h.get('dividend_ex_upcoming')
+                          else f'<span class="exdate-past">{ex} (passed)</span>')
+            else:
+                ex_html = '<span class="exdate-none">—</span>'
+            dps_txt = f"KES {h['dps_fy']:.2f}/share" if h.get('dps_fy') else '—'
+            dy_txt = f"{h['dividend_yield']:.1f}%" if h.get('dividend_yield') is not None else '—'
+            div_rows += (
+                f'<tr><td><strong>{h["symbol"]}</strong></td>'
+                f'<td>{badge}</td>'
+                f'<td>{dps_txt}</td>'
+                f'<td>{dy_txt}</td>'
+                f'<td>KES {(h.get("est_annual_dividend") or 0):,.0f}/yr</td>'
+                f'<td>{ex_html}</td></tr>')
+        if div_rows:
+            parts.append(
+                '<div class="section"><h2>💵 Dividends on Your Holdings</h2>'
+                '<p class="page-intro">The declared dividend per share, cross-checked against the NSE '
+                'dividend calendar, and what it\'s worth on your position.</p>'
+                '<div class="table-wrap"><table><thead><tr>'
+                '<th>Symbol</th><th>Status</th><th>Per Share</th><th>Yield</th>'
+                '<th>Your Est. Income</th><th>Ex-Date</th></tr></thead>'
+                f'<tbody>{div_rows}</tbody></table></div></div>')
+
+        # ---------- news on your holdings ----------
+        if news:
+            cards = ''
+            for n in news[:24]:
+                cards += (
+                    f'<div class="explain-card"><h4>{n["symbol"]} '
+                    f'<span style="font-weight:400;color:#94a3b8;font-size:0.75rem;">· {n.get("source","")}</span></h4>'
+                    f'<p><a href="{n["url"]}" target="_blank" rel="noopener" style="color:#1e293b;text-decoration:none;">{n["title"]}</a></p>'
+                    f'<p class="eg" style="color:#94a3b8;">📅 {n.get("published_utc","")}</p></div>')
+            parts.append(
+                '<div class="section"><h2>📰 News on Your Holdings</h2>'
+                '<p class="page-intro">Latest headlines mentioning companies you hold, newest first. '
+                '<strong>Shown neutral, on purpose</strong> — reliable automatic positive/negative tagging '
+                'of financial headlines isn\'t possible with free tools (it\'s wrong often enough to be '
+                'dangerous with real money); read the headline and judge for yourself. The "Today" column '
+                'in your holdings table and the TV Signal are the closest real, verified signals this '
+                'dashboard can offer.</p>'
+                f'<div class="explain-grid">{cards}</div></div>')
+        else:
+            parts.append(
+                '<div class="section"><h2>📰 News on Your Holdings</h2>'
+                '<p class="page-intro">No headlines found this run (source may be temporarily unavailable, '
+                'or nothing recent for these companies). Try again next run.</p></div>')
+
+        # ---------- how to add a purchase (repeated here for convenience) ----------
+        parts.append(
+            '<div class="section"><h2>➕ Add a New Purchase</h2>'
+            '<p class="page-intro">Every time you buy — even more of a stock you already hold:</p>'
+            '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
+            'overflow-x:auto;font-size:0.85rem;">python3 add_holding.py SYMBOL QUANTITY PRICE [DATE]\n'
+            'python3 add_holding.py SCOM 500 34.50\n'
+            'python3 add_holding.py SCOM 500 34.50 2026-09-20</pre>'
+            '<div class="dq-note">Multiple purchases of the same stock combine automatically into one row '
+            'with a correctly weighted average cost. Full details in portfolio/README.md. Nothing here is '
+            'ever committed to git.</div></div>')
+
+        return ''.join(parts)
+
     def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
                                sector_chart, bullish, bearish, neutral, total,
-                               data_date=None, alerts=None, usd_kes=None):
+                               data_date=None, alerts=None, usd_kes=None,
+                               portfolio_summary=None, portfolio_history=None,
+                               portfolio_news=None, portfolio_history_tracker=None):
         """
         Build the multi-page dashboard: a clean Overview plus grouped detail
         pages (Technicals, Fundamentals, Dividends, Sectors, Data Quality).
@@ -3024,9 +3498,16 @@ tr:hover { background: #f8fafc; }
         # ---- GOVERNMENT BONDS page (CBK Treasury bonds + bills) ----
         bonds_body = self._build_bonds_body()
 
+        # ---- MY PORTFOLIO page (private — empty state if not set up) ----
+        portfolio_body = self._build_portfolio_body(
+            portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
+            history_tracker=portfolio_history_tracker,
+        )
+
         # ---- Assemble & write all pages ----
         pages = {
             'index.html': self._page_shell('NSE Dashboard — Overview', 'index.html', subtitle, overview_body, with_filter=True),
+            'portfolio.html': self._page_shell('NSE — My Portfolio', 'portfolio.html', subtitle, portfolio_body, with_filter=True),
             'visuals.html': self._page_shell('NSE — Visuals', 'visuals.html', subtitle, visuals_body),
             'technicals.html': self._page_shell('NSE — Technicals', 'technicals.html', subtitle, technicals_body, with_filter=True),
             'fundamentals.html': self._page_shell('NSE — Fundamentals', 'fundamentals.html', subtitle, fundamentals_body, with_filter=True),

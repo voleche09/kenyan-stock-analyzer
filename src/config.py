@@ -78,6 +78,11 @@ class Config:
             PROJECT_ROOT / os.getenv('TEMPLATE_DIR', 'templates')
         )
 
+        # ---- Personal portfolio (private — gitignored, see portfolio/README.md) ----
+        self.portfolio_dir = str(
+            PROJECT_ROOT / os.getenv('PORTFOLIO_DIR', 'portfolio')
+        )
+
         # ---- Logging ----
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_file = os.getenv('LOG_FILE', './logs/analyzer.log')
@@ -104,7 +109,7 @@ class Config:
         self.stock_symbols = self._load_symbols()
 
         # ---- Ensure directories exist ----
-        for d in [self.report_directory, self.cache_dir,
+        for d in [self.report_directory, self.cache_dir, self.portfolio_dir,
                   os.path.dirname(self.log_file)]:
             os.makedirs(d, exist_ok=True)
 
