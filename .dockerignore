@@ -1,0 +1,62 @@
+# ============================================================================
+# Excluded from the Docker BUILD CONTEXT — never baked into an image layer.
+#
+# This is a privacy boundary, not just a size optimization. portfolio/holdings.json,
+# portfolio/bonds.json and the *_history.json files hold your REAL money — how much
+# you own, what you paid, your cost basis. An image layer is a distributable
+# artifact: if it ever contains these files, anyone who receives or pulls that
+# image (a registry, a teammate, a backup) receives your financial data with it,
+# permanently, even if you later delete the file — old layers persist in image
+# history. This file is what stops that from being possible in the first place.
+#
+# At RUNTIME, your real portfolio/ directory is bind-mounted into the running
+# container from the host (see docker-compose.yml) — completely different from
+# being copied into the image at build time. The app reads it live; the image
+# itself never contains it. That is the whole point of this file.
+# ============================================================================
+
+# ---- Private financial data — NEVER let these into an image layer ----
+portfolio/holdings.json
+portfolio/bonds.json
+portfolio/history.json
+portfolio/bonds_history.json
+
+# ---- Local Python environment ----
+venv/
+.venv/
+env/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# ---- Generated, regenerated fresh inside the container anyway ----
+data/
+reports/
+logs/
+
+# ---- Secrets — passed as real environment variables at `docker run` /
+# `docker compose up` time (see docker-compose.yml's env_file:), never
+# copied into the image ----
+.env
+.env.local
+*.env
+!.env.example
+
+# ---- VCS / editor / OS cruft ----
+.git/
+.github/
+.gitignore
+.dockerignore
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# ---- Claude Code project settings (local paths, not relevant in-image) ----
+.claude/
+
+# ---- Docs not needed at runtime (kept out of the image; still in git) ----
+CLAUDE.md
