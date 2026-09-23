@@ -1,0 +1,89 @@
+# Kenyan Stock Analyzer — Docker Compose deployment
+#
+# Two services:
+#   generator — runs the pipeline on a schedule (supercronic, inside the
+#               container — see Dockerfile/docker/entrypoint.sh) and writes
+#               static HTML/PDF/Excel into ./reports.
+#   web       — plain nginx, serves ./reports so you can browse the
+#               dashboard from any device on your tailnet.
+#
+# They share the SAME directory layout as the bare-metal install (./data,
+# ./reports, ./logs, ./portfolio) via bind mounts, so switching between
+# `./run.sh` and Docker never means hunting for your data in two places —
+# it's the same folders either way.
+#
+# Full walkthrough, Tailscale access, and the scheduling explanation (why
+# this works even though plain `docker run` isn't a scheduler) are in
+# README.md's "Running with Docker" section.
+
+services:
+  generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kenyan-stock-analyzer:latest
+    container_name: nse-analyzer-generator
+    restart: unless-stopped
+    env_file:
+      # Optional so a first `docker compose up` works even before you've
+      # created .env — same forgiving behaviour as bare-metal (config.py
+      # falls back to built-in defaults for anything not set). Copy
+      # .env.example to .env to actually configure email, feature flags, etc.
+      - path: .env
+        required: false
+    environment:
+      # Standard 5-field crontab syntax, interpreted in TZ (below). Default:
+      # 16:00 Africa/Nairobi, weekdays — an hour after the NSE's 15:00 close,
+      # once the official closing prices have settled (see .env.example's
+      # ENABLE_OFFICIAL_CLOSE comment). Override in .env to change it.
+      SCHEDULE_CRON: ${SCHEDULE_CRON:-0 16 * * 1-5}
+      RUN_ON_STARTUP: ${RUN_ON_STARTUP:-true}
+      TZ: Africa/Nairobi
+    # Matches the host user that owns the bind-mounted folders below, so the
+    # container can actually write to them. Defaults to 1000:1000 (the most
+    # common first-user UID on Linux); if `id -u` on your home-lab host
+    # returns something else, set PUID/PGID in .env — see README.md.
+    user: "${PUID:-1000}:${PGID:-1000}"
+    volumes:
+      - ./data:/app/data
+      - ./reports:/app/reports
+      - ./logs:/app/logs
+      # Your REAL holdings — bind-mounted from the host, exactly like the
+      # bare-metal install, and for the exact same reason: this stays on
+      # your machine, under your control, and is never baked into the image
+      # (.dockerignore excludes it from the build context) or committed to
+      # git (.gitignore already covers portfolio/holdings.json etc.).
+      - ./portfolio:/app/portfolio
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "supercronic"]
+      interval: 5m
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+  web:
+    # nginx's STABLE branch (even minor version — nginx's own recommendation
+    # for production; the "mainline" odd-numbered branch is for testing new
+    # features). Pinned to the minor version, not an exact patch, so
+    # `docker compose pull && docker compose up -d` picks up security
+    # patches within 1.30.x without you needing to edit this file.
+    image: nginx:1.30-alpine
+    container_name: nse-analyzer-web
+    restart: unless-stopped
+    depends_on:
+      - generator
+    ports:
+      # Host port : container port. Change the left-hand side if 8080 is
+      # already taken on your home-lab host. Bind to a Tailscale-only
+      # address instead of all interfaces if you don't want it reachable on
+      # your LAN at all — see README.md's Tailscale section for exactly how.
+      - "8080:80"
+    volumes:
+      - ./reports:/usr/share/nginx/html:ro
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost/"]
+      interval: 1m
+      timeout: 5s
+      start_period: 10s
+      retries: 3
