@@ -23,7 +23,10 @@ services:
       dockerfile: Dockerfile
     image: kenyan-stock-analyzer:latest
     container_name: nse-analyzer-generator
-    restart: unless-stopped
+    # always (not unless-stopped): comes back up after a host reboot even if
+    # it was sitting in a manually-stopped state beforehand — the right
+    # choice for a home-lab service that should just always be there.
+    restart: always
     env_file:
       # Optional so a first `docker compose up` works even before you've
       # created .env — same forgiving behaviour as bare-metal (config.py
@@ -69,7 +72,7 @@ services:
     # patches within 1.30.x without you needing to edit this file.
     image: nginx:1.30-alpine
     container_name: nse-analyzer-web
-    restart: unless-stopped
+    restart: always
     depends_on:
       - generator
     ports:
