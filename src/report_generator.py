@@ -1302,6 +1302,34 @@ tr:hover { background: #f8fafc; }
 .hist-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; }
 .hist-x { font-size: 0.6rem; color: #94a3b8; margin-top: 4px; white-space: nowrap; }
 @media (max-width: 768px) { .heat-tile { width: 72px; height: 50px; } }
+/* ===== Collapsible reference sections (native <details>, no JS) ===== */
+details.section-details { background: white; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden; }
+details.section-details > summary { list-style: none; cursor: pointer; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+details.section-details > summary::-webkit-details-marker { display: none; }
+details.section-details > summary h2 { margin: 0; border-bottom: none; padding-bottom: 0; }
+details.section-details > summary .toggle-hint { flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+details.section-details[open] > summary .toggle-hint::before { content: '▲ Hide'; }
+details.section-details:not([open]) > summary .toggle-hint::before { content: '▼ Show'; }
+details.section-details > summary:hover { background: #f8fafc; }
+details.section-details > .details-body { padding: 0 20px 20px; }
+/* ===== Quick-jump anchor pills ===== */
+.jumpnav { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 20px; }
+.jumpnav a { font-size: 0.8rem; font-weight: 600; color: #334155; background: white; border: 1px solid #e2e8f0; border-radius: 20px; padding: 6px 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.jumpnav a:hover { border-color: #3b82f6; color: #1e40af; }
+.jumpnav .jumpnav-group { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: #94a3b8; align-self: center; margin-right: -2px; }
+/* ===== Combined Net Worth glance (stocks + bonds) ===== */
+.networth-hero { background: linear-gradient(135deg, #0f172a, #1e293b); border-radius: 14px; padding: 24px 26px; margin-bottom: 20px; color: white; }
+.networth-hero .nw-total-label { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; color: #94a3b8; }
+.networth-hero .nw-total-value { font-size: 2.4rem; font-weight: 800; margin: 2px 0 4px; }
+.networth-hero .nw-total-sub { font-size: 0.85rem; color: #cbd5e1; }
+.networth-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-top: 18px; }
+.networth-split .nw-card { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 14px 16px; }
+.networth-split .nw-card h4 { margin: 0 0 8px; font-size: 0.9rem; }
+.networth-split .nw-card .nw-row { display: flex; justify-content: space-between; font-size: 0.82rem; color: #cbd5e1; margin: 3px 0; }
+.networth-split .nw-card .nw-row b { color: white; font-variant-numeric: tabular-nums; }
+.networth-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; margin-top: 14px; background: rgba(255,255,255,0.08); }
+.networth-bar > div:first-child { background: #3b82f6; }
+.networth-bar > div:last-child { background: #16a34a; }
 </style>"""
 
     def _make_foreign_flow_trend_chart(self, weeks):
@@ -2810,8 +2838,99 @@ tr:hover { background: #f8fafc; }
                  "the same one shown throughout this dashboard. Not personalized advice.</div>")
         return "".join(p).replace("&", "&amp;").replace('"', "&quot;")
 
+    def _build_networth_glance(self, portfolio_summary, bond_portfolio):
+        """
+        Combined "at a glance" hero for the top of My Portfolio — total net
+        worth across stocks + bonds together, before either section's own
+        detail. Deliberately honest about what each half actually is:
+        stocks' value is a real, verified market price; bonds' value is an
+        INDICATIVE par-based figure (see bonds_portfolio.py's own docstring)
+        since Kenya's secondary bond market has no live retail quote feed.
+        These are never blended into one misleading "market value" — the
+        split is always shown, and the combined total is clearly labelled.
+        Returns '' if neither exists (each page's own empty state covers it).
+        """
+        has_stocks = bool(portfolio_summary)
+        has_bonds = bool(bond_portfolio)
+        if not has_stocks and not has_bonds:
+            return ''
+
+        stocks_value = portfolio_summary['totals']['market_value'] if has_stocks else 0.0
+        stocks_cost = portfolio_summary['totals']['cost_basis'] if has_stocks else 0.0
+        stocks_gain = portfolio_summary['totals']['gain'] if has_stocks else 0.0
+        stocks_day = portfolio_summary['totals'].get('day_change_value') if has_stocks else None
+        stocks_day_pct = portfolio_summary['totals'].get('day_change_pct') if has_stocks else None
+
+        bonds_value = bond_portfolio['totals']['indicative_value_par'] if has_bonds else 0.0
+        bonds_cost = bond_portfolio['totals']['cost_basis'] if has_bonds else 0.0
+        bonds_income = bond_portfolio['totals']['annual_after_tax_income'] if has_bonds else 0.0
+
+        total_value = stocks_value + bonds_value
+        total_cost = stocks_cost + bonds_cost
+        total_gain = total_value - total_cost
+        total_gain_pct = (total_gain / total_cost * 100.0) if total_cost else None
+        stocks_pct_of_total = (stocks_value / total_value * 100.0) if total_value else 0.0
+        bonds_pct_of_total = 100.0 - stocks_pct_of_total if total_value else 0.0
+
+        def stocks_block():
+            if not has_stocks:
+                return ('<div class="nw-card"><h4>📈 Stocks</h4>'
+                        '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
+                        '<code style="color:#93c5fd;">python3 add_holding.py SCOM 500 34.50</code></p></div>')
+            day_txt = f'{stocks_day_pct:+.2f}%' if stocks_day_pct is not None else '—'
+            day_color = '#4ade80' if (stocks_day_pct or 0) >= 0 else '#f87171'
+            gain_color = '#4ade80' if stocks_gain >= 0 else '#f87171'
+            return (
+                '<div class="nw-card"><h4>📈 Stocks <a href="#stocks-top" style="float:right;'
+                'font-size:0.7rem;color:#93c5fd;">jump ↓</a></h4>'
+                f'<div class="nw-row"><span>Market value</span><b>KES {stocks_value:,.0f}</b></div>'
+                f'<div class="nw-row"><span>Gain / loss</span><b style="color:{gain_color}">'
+                f'KES {stocks_gain:+,.0f}</b></div>'
+                f'<div class="nw-row"><span>Today</span><b style="color:{day_color}">{day_txt}</b></div>'
+                f'<div class="nw-row"><span>Share of net worth</span><b>{stocks_pct_of_total:.0f}%</b></div>'
+                '</div>')
+
+        def bonds_block():
+            if not has_bonds:
+                return ('<div class="nw-card"><h4>🏦 Bonds</h4>'
+                        '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
+                        '<code style="color:#93c5fd;">python3 add_bond.py IFB1/2023/6.5 150000</code></p></div>')
+            return (
+                '<div class="nw-card"><h4>🏦 Bonds <a href="#bonds-top" style="float:right;'
+                'font-size:0.7rem;color:#93c5fd;">jump ↓</a></h4>'
+                f'<div class="nw-row"><span>Indicative value</span><b>KES {bonds_value:,.0f}</b></div>'
+                f'<div class="nw-row"><span>Annual income (after tax)</span><b style="color:#4ade80">'
+                f'KES {bonds_income:,.0f}</b></div>'
+                '<div class="nw-row"><span>Today</span><b style="color:#94a3b8;">n/a — see note</b></div>'
+                f'<div class="nw-row"><span>Share of net worth</span><b>{bonds_pct_of_total:.0f}%</b></div>'
+                '</div>')
+
+        gain_sub = ''
+        if total_cost:
+            gain_color = '#4ade80' if total_gain >= 0 else '#f87171'
+            gain_sub = (f'<span style="color:{gain_color};font-weight:700;">'
+                       f'{"+" if total_gain >= 0 else ""}KES {total_gain:,.0f} '
+                       f'({total_gain_pct:+.1f}%)</span> vs. KES {total_cost:,.0f} you put in')
+
+        return (
+            '<div class="networth-hero">'
+            '<div class="nw-total-label">💰 Total Net Worth — Stocks + Bonds, Today</div>'
+            f'<div class="nw-total-value">KES {total_value:,.0f}</div>'
+            f'<div class="nw-total-sub">{gain_sub}</div>'
+            '<div class="networth-split">'
+            f'{stocks_block()}{bonds_block()}'
+            '</div>'
+            f'<div class="networth-bar"><div style="width:{stocks_pct_of_total:.1f}%"></div>'
+            f'<div style="width:{bonds_pct_of_total:.1f}%"></div></div>'
+            '<div style="font-size:0.72rem;color:#94a3b8;margin-top:8px;">🔵 Stocks (real, verified market '
+            'price) &nbsp; 🟢 Bonds (indicative par value — Kenya\'s secondary bond market has no live '
+            'retail quote feed, so this assumes each bond is worth face value; see the bonds section for '
+            'the honest yield-sensitivity lookup). "Today" only applies to stocks — bonds don\'t reprice '
+            'daily in this model.</div>'
+            '</div>')
+
     def _build_portfolio_body(self, portfolio_summary, history_rows=None, news=None,
-                              history_tracker=None):
+                              history_tracker=None, bond_portfolio=None):
         """
         My Portfolio page — your real holdings, computed live from the exact
         same verified data used everywhere else on this dashboard. Nothing
@@ -2847,6 +2966,7 @@ tr:hover { background: #f8fafc; }
 
         # ---------- disclaimer ----------
         parts.append(
+            '<a id="stocks-top"></a>'
             '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
             'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
             '⚠️ <strong>Your private portfolio — educational information, not financial advice.</strong> '
@@ -2928,6 +3048,19 @@ tr:hover { background: #f8fafc; }
                 'snapshot that far back.</p>'
                 f'<div class="stats">{cards}</div></div>')
 
+        # ---------- quick jump nav — skip straight to a section, no forced scroll ----------
+        has_dividends = any(h.get('data_available') and h.get('dps_fy') for h in holdings)
+        jump_links = [('#stocks-charts', '📊 Charts'), ('#stocks-holdings', '📋 Holdings')]
+        if has_dividends:
+            jump_links.append(('#stocks-dividends', '💵 Dividends'))
+        jump_links.append(('#stocks-news', '📰 News'))
+        if bond_portfolio:
+            jump_links.append(('#bonds-top', '🏦 Jump to Bonds'))
+        parts.append(
+            '<div class="jumpnav"><span class="jumpnav-group">Jump to:</span>'
+            + ''.join(f'<a href="{href}">{label}</a>' for href, label in jump_links)
+            + '</div>')
+
         # ---------- charts ----------
         chart_html = ''
         alloc_chart = self._make_portfolio_allocation_chart(portfolio_summary.get('sector_allocation'))
@@ -2952,7 +3085,7 @@ tr:hover { background: #f8fafc; }
         if weight_chart:
             chart_html += (f'<img src="data:image/png;base64,{weight_chart}" class="chart-img" '
                            'style="margin-top:14px;" alt="Portfolio weight by holding">')
-        parts.append(f'<div class="section"><h2>📊 Portfolio Charts</h2>{chart_html}</div>')
+        parts.append(f'<div class="section" id="stocks-charts"><h2>📊 Portfolio Charts</h2>{chart_html}</div>')
 
         # ---------- holdings table (sortable — click any header) ----------
         rows = ''
@@ -2995,7 +3128,7 @@ tr:hover { background: #f8fafc; }
             f'<th class="sortable" data-sort-type="{typ}" onclick="sortTable(this)"'
             + (f' title="{title}"' if title else '') + f'>{label}</th>')
         parts.append(
-            '<div class="section"><h2>📋 Your Holdings</h2>'
+            '<div class="section" id="stocks-holdings"><h2>📋 Your Holdings</h2>'
             '<p class="dq-note" style="margin-bottom:12px;">💡 Click any column header to sort. Hover a '
             'row for the full breakdown behind its score. "ROE" is the company\'s own Return on Equity '
             '(green ≥15%, red &lt;5%) — a company-quality metric, not your personal return (that\'s the '
@@ -3035,13 +3168,15 @@ tr:hover { background: #f8fafc; }
                 f'<td>{ex_html}</td></tr>')
         if div_rows:
             parts.append(
-                '<div class="section"><h2>💵 Dividends on Your Holdings</h2>'
+                '<details class="section-details" id="stocks-dividends"><summary>'
+                '<h2>💵 Dividends on Your Holdings</h2><span class="toggle-hint"></span></summary>'
+                '<div class="details-body">'
                 '<p class="page-intro">The declared dividend per share, cross-checked against the NSE '
                 'dividend calendar, and what it\'s worth on your position.</p>'
                 '<div class="table-wrap"><table><thead><tr>'
                 '<th>Symbol</th><th>Status</th><th>Per Share</th><th>Yield</th>'
                 '<th>Your Est. Income</th><th>Ex-Date</th></tr></thead>'
-                f'<tbody>{div_rows}</tbody></table></div></div>')
+                f'<tbody>{div_rows}</tbody></table></div></div></details>')
 
         # ---------- news on your holdings ----------
         if news:
@@ -3053,23 +3188,31 @@ tr:hover { background: #f8fafc; }
                     f'<p><a href="{n["url"]}" target="_blank" rel="noopener" style="color:#1e293b;text-decoration:none;">{n["title"]}</a></p>'
                     f'<p class="eg" style="color:#94a3b8;">📅 {n.get("published_utc","")}</p></div>')
             parts.append(
-                '<div class="section"><h2>📰 News on Your Holdings</h2>'
+                '<details class="section-details" id="stocks-news"><summary>'
+                f'<h2>📰 News on Your Holdings <span style="font-weight:400;font-size:0.7rem;'
+                f'color:#94a3b8;">({len(news)} in last 7 days)</span></h2>'
+                '<span class="toggle-hint"></span></summary><div class="details-body">'
                 '<p class="page-intro">Headlines from the <strong>last 7 days</strong> mentioning companies '
                 'you hold, newest first. <strong>Shown neutral, on purpose</strong> — reliable automatic '
                 'positive/negative tagging of financial headlines isn\'t possible with free tools (it\'s '
                 'wrong often enough to be dangerous with real money); read the headline and judge for '
                 'yourself. The "Today" column in your holdings table and the TV Signal are the closest '
                 'real, verified signals this dashboard can offer.</p>'
-                f'<div class="explain-grid">{cards}</div></div>')
+                f'<div class="explain-grid">{cards}</div></div></details>')
         else:
             parts.append(
-                '<div class="section"><h2>📰 News on Your Holdings</h2>'
+                '<details class="section-details" id="stocks-news"><summary>'
+                '<h2>📰 News on Your Holdings</h2><span class="toggle-hint"></span></summary>'
+                '<div class="details-body">'
                 '<p class="page-intro">No headlines from the last 7 days for these companies (source may '
-                'be temporarily unavailable, or nothing recent was published). Try again next run.</p></div>')
+                'be temporarily unavailable, or nothing recent was published). Try again next run.</p>'
+                '</div></details>')
 
         # ---------- how to add a purchase (repeated here for convenience) ----------
         parts.append(
-            '<div class="section"><h2>➕ Add a New Purchase</h2>'
+            '<details class="section-details"><summary>'
+            '<h2>➕ Add a New Purchase</h2><span class="toggle-hint"></span></summary>'
+            '<div class="details-body">'
             '<p class="page-intro">Every time you buy — even more of a stock you already hold:</p>'
             '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
             'overflow-x:auto;font-size:0.85rem;">python3 add_holding.py SYMBOL QUANTITY PRICE [DATE]\n'
@@ -3077,7 +3220,7 @@ tr:hover { background: #f8fafc; }
             'python3 add_holding.py SCOM 500 34.50 2026-09-20</pre>'
             '<div class="dq-note">Multiple purchases of the same stock combine automatically into one row '
             'with a correctly weighted average cost. Full details in portfolio/README.md. Nothing here is '
-            'ever committed to git.</div></div>')
+            'ever committed to git.</div></div></details>')
 
         return ''.join(parts)
 
@@ -3169,7 +3312,7 @@ tr:hover { background: #f8fafc; }
         ax.grid(True, alpha=0.3)
         return self._fig_to_b64()
 
-    def _build_bonds_holdings_body(self, bond_portfolio):
+    def _build_bonds_holdings_body(self, bond_portfolio, portfolio_summary=None):
         """
         My Bonds section — your real Treasury/Infrastructure bond holdings.
         Appended onto the SAME private portfolio.html page as your stock
@@ -3206,6 +3349,7 @@ tr:hover { background: #f8fafc; }
 
         # ---------- privacy / disclaimer ----------
         parts.append(
+            '<a id="bonds-top"></a>'
             '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
             'padding:14px 18px;margin:28px 0 18px;font-size:0.9rem;color:#78350f;">'
             '⚠️ <strong>Your private bond portfolio — educational information, not financial or tax '
@@ -3253,9 +3397,21 @@ tr:hover { background: #f8fafc; }
             'bonds. The chart below shows how this would change if market yields were actually higher or '
             'lower than each bond\'s own coupon.</div></div>')
 
+        # ---------- quick jump nav ----------
+        jump_links = [('#bonds-charts', '📊 Charts'), ('#bonds-detail', '📋 Holdings'),
+                      ('#bonds-calendar', '📅 Payment Calendar')]
+        if portfolio_summary:
+            jump_links.append(('#stocks-top', '📈 Jump to Stocks'))
+        parts.append(
+            '<div class="jumpnav"><span class="jumpnav-group">Jump to:</span>'
+            + ''.join(f'<a href="{href}">{label}</a>' for href, label in jump_links)
+            + '</div>')
+
         # ---------- educational: how to read this section ----------
         parts.append(
-            '<div class="section"><h2>📘 Understanding Your Bonds</h2>'
+            '<details class="section-details"><summary>'
+            '<h2>📘 Understanding Your Bonds</h2><span class="toggle-hint"></span></summary>'
+            '<div class="details-body">'
             '<p class="page-intro">A quick primer on the concepts below, written for exactly the four '
             'bonds you hold.</p>'
             '<div class="explain-grid">'
@@ -3299,7 +3455,7 @@ tr:hover { background: #f8fafc; }
             'NSE does for shares. Rather than invent one number, the sensitivity table &amp; chart below '
             'give you the honest tool: look up a recent CBK auction/re-opening yield for a similar tenor, '
             'find the closest row, and read off a grounded estimate.</p></div>'
-            '</div></div>')
+            '</div></div></details>')
 
         # ---------- charts ----------
         chart_html = ''
@@ -3326,7 +3482,7 @@ tr:hover { background: #f8fafc; }
         if two_up:
             chart_html += f'<div class="grid-2" style="margin-top:14px;">{two_up}</div>'
         if chart_html:
-            parts.append(f'<div class="section"><h2>📊 Bond Charts</h2>{chart_html}</div>')
+            parts.append(f'<div class="section" id="bonds-charts"><h2>📊 Bond Charts</h2>{chart_html}</div>')
 
         # ---------- per-bond detail cards ----------
         cards = ''
@@ -3370,7 +3526,7 @@ tr:hover { background: #f8fafc; }
                 '</div>')
         if cards:
             parts.append(
-                '<div class="section"><h2>📋 Your Bond Holdings — Detail</h2>'
+                '<div class="section" id="bonds-detail"><h2>📋 Your Bond Holdings — Detail</h2>'
                 f'<div class="explain-grid">{cards}</div></div>')
 
         # ---------- upcoming 12 months ----------
@@ -3386,14 +3542,15 @@ tr:hover { background: #f8fafc; }
                 rows += (f'<tr><td><strong>{r["date"]}</strong></td><td>{" + ".join(parts_txt)}</td>'
                         f'<td class="positive">KES {r["total"]:,.2f}</td><td>{", ".join(r["bonds"])}</td></tr>')
             parts.append(
-                '<div class="section"><h2>📅 Payments Expected in the Next 12 Months</h2>'
+                '<div class="section" id="bonds-calendar"><h2>📅 Payments Expected in the Next 12 Months</h2>'
                 '<p class="page-intro">Every coupon and principal repayment due across all your bonds, '
                 'soonest first.</p>'
                 '<div class="table-wrap"><table><thead><tr>'
                 '<th>Date</th><th>What</th><th>Total</th><th>Bond(s)</th>'
                 f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
 
-        # ---------- full cash-flow schedule per bond ----------
+        # ---------- full cash-flow schedule per bond (collapsed — long) ----------
+        schedule_cards = ''
         for b in sorted(avail, key=lambda x: x['face_value'], reverse=True):
             all_future = b.get('cashflows_future') or []
             if not all_future:
@@ -3413,15 +3570,19 @@ tr:hover { background: #f8fafc; }
                 total_row = v['coupon'] + v['principal']
                 rows += (f'<tr><td>{date_key}</td><td>{" + ".join(event)}</td>'
                         f'<td class="positive">KES {total_row:,.2f}</td></tr>')
-            parts.append(
-                f'<div class="section"><h2>🗓️ {b["issue"]} — Full Remaining Cash-Flow Schedule</h2>'
+            schedule_cards += (
+                f'<details class="section-details"><summary>'
+                f'<h2>🗓️ {b["issue"]} — Full Remaining Cash-Flow Schedule</h2>'
+                '<span class="toggle-hint"></span></summary><div class="details-body">'
                 f'<p class="page-intro">Every payment left on this bond, from today to '
                 f'{b["effective_redemption_date"]}.</p>'
                 '<div class="table-wrap"><table><thead><tr>'
                 f'<th>Date</th><th>Payment</th><th>Amount</th>'
-                f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+                f'</tr></thead><tbody>{rows}</tbody></table></div></div></details>')
+        if schedule_cards:
+            parts.append(schedule_cards)
 
-        # ---------- price / yield sensitivity table ----------
+        # ---------- price / yield sensitivity table (collapsed — reference lookup) ----------
         sens_with_rows = [(issue, rows) for issue, rows in sensitivity_series if rows]
         if sens_with_rows:
             tables = ''
@@ -3441,7 +3602,9 @@ tr:hover { background: #f8fafc; }
                     '<th>Dirty price /100</th><th>Your holding would be worth</th>'
                     f'</tr></thead><tbody>{trs}</tbody></table></div></div>')
             parts.append(
-                '<div class="section"><h2>🔍 Price / Yield Sensitivity — Look Up Today\'s Real Value</h2>'
+                '<details class="section-details"><summary>'
+                '<h2>🔍 Price / Yield Sensitivity — Look Up Today\'s Real Value</h2>'
+                '<span class="toggle-hint"></span></summary><div class="details-body">'
                 '<p class="page-intro">Find a recent Central Bank of Kenya Treasury/Infrastructure bond '
                 'auction result for a <strong>similar remaining tenor</strong> (published at '
                 '<a href="https://www.centralbank.go.ke/bills-bonds/treasury-bonds/" target="_blank" '
@@ -3453,11 +3616,13 @@ tr:hover { background: #f8fafc; }
                 '<div class="dq-note">Computed with the standard bond-pricing formula (present value of '
                 'remaining coupons + principal, discounted semi-annually) — the same convention CBK '
                 'itself uses in its own prospectus pricing tables. "Clean price" excludes accrued '
-                'interest; "dirty price" (what you\'d actually pay or receive) includes it.</div></div>')
+                'interest; "dirty price" (what you\'d actually pay or receive) includes it.</div></div></details>')
 
         # ---------- how to add a bond (repeated here for convenience) ----------
         parts.append(
-            '<div class="section"><h2>➕ Add a New Bond</h2>'
+            '<details class="section-details"><summary>'
+            '<h2>➕ Add a New Bond</h2><span class="toggle-hint"></span></summary>'
+            '<div class="details-body">'
             '<p class="page-intro">Every time you buy a new bond, or top up an existing one:</p>'
             '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
             'overflow-x:auto;font-size:0.85rem;">python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE]\n'
@@ -3465,7 +3630,7 @@ tr:hover { background: #f8fafc; }
             'python3 add_bond.py FXD1/2022/025 250000 100.0 2022-09-23</pre>'
             '<div class="dq-note">Full details, including how the small-holder amortization rule and '
             'tax treatment are determined, in <code>portfolio/README.md</code> and '
-            '<code>src/bonds_portfolio.py</code>. Nothing here is ever committed to git.</div></div>')
+            '<code>src/bonds_portfolio.py</code>. Nothing here is ever committed to git.</div></div></details>')
 
         return ''.join(parts)
 
@@ -3889,13 +4054,18 @@ tr:hover { background: #f8fafc; }
         bonds_body = self._build_bonds_body()
 
         # ---- MY PORTFOLIO page (private — empty state if not set up) ----
-        # Stock holdings first, then bond holdings appended below them —
-        # both live on this one private page, per the same never-committed
-        # portfolio/ directory discipline.
-        portfolio_body = self._build_portfolio_body(
-            portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
-            history_tracker=portfolio_history_tracker,
-        ) + self._build_bonds_holdings_body(bond_portfolio)
+        # Combined Stocks+Bonds "at a glance" net worth first (most important,
+        # zero scrolling), then the full stock section, then the full bond
+        # section — both live on this one private page, per the same
+        # never-committed portfolio/ directory discipline.
+        portfolio_body = (
+            self._build_networth_glance(portfolio_summary, bond_portfolio)
+            + self._build_portfolio_body(
+                portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
+                history_tracker=portfolio_history_tracker, bond_portfolio=bond_portfolio,
+            )
+            + self._build_bonds_holdings_body(bond_portfolio, portfolio_summary=portfolio_summary)
+        )
 
         # ---- Assemble & write all pages ----
         pages = {
