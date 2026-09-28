@@ -268,6 +268,62 @@ def main():
         except Exception as e:
             logger.warning(f"Bond tracking skipped: {e}")
 
+        # ---- International (US) stock portfolio (private — portfolio/international_holdings.json, gitignored) ----
+        # Skipped entirely (empty-state section) if the user hasn't added holdings.
+        # Uses Yahoo Finance (international_data.py) plus the SAME AnalysisEngine
+        # and scoring.score_stock() already used for NSE stocks — no parallel
+        # technical-analysis or factor-scoring logic to maintain.
+        intl_portfolio_summary = None
+        intl_portfolio_history_rows = []
+        intl_portfolio_news = []
+        intl_portfolio_history_tracker = None
+        try:
+            import international_portfolio as intl_mod
+            import international_data as intl_data
+            from portfolio import PortfolioHistoryTracker
+            intl_lots = intl_mod.load_holdings(config.portfolio_dir)
+            if intl_lots:
+                intl_symbols = sorted({l['symbol'] for l in intl_lots})
+                logger.info(f"International portfolio: {len(intl_lots)} lot(s) across "
+                           f"{len(intl_symbols)} holding(s)")
+                intl_analysis_results = {}
+                intl_fundamentals_data = {}
+                for sym in intl_symbols:
+                    hist = intl_data.fetch_history(
+                        sym, period=args.period, interval=args.interval,
+                        cache_dir=config.cache_dir, force_refresh=args.force_refresh,
+                    )
+                    if hist is not None:
+                        intl_analysis_results[sym] = analysis_engine.analyze_stock(hist)
+                    intl_fundamentals_data[sym] = intl_data.fetch_fundamentals(sym)
+
+                intl_scores = {}
+                if config.enable_scoring:
+                    try:
+                        from scoring import score_stock
+                        for sym, result in intl_analysis_results.items():
+                            if result:
+                                intl_scores[sym] = score_stock(sym, result, intl_fundamentals_data.get(sym, {}))
+                    except Exception as e:
+                        logger.warning(f"International scoring skipped: {e}")
+
+                intl_portfolio_summary = intl_mod.compute_international_portfolio(
+                    intl_lots, intl_analysis_results, intl_fundamentals_data, intl_scores, usd_kes,
+                )
+                intl_portfolio_history_tracker = PortfolioHistoryTracker(
+                    config.portfolio_dir, history_filename=intl_mod.HISTORY_FILE,
+                )
+                intl_portfolio_history_tracker.record_snapshot(intl_portfolio_summary)
+                intl_portfolio_history_rows = intl_portfolio_history_tracker.load_history()
+                intl_portfolio_news = intl_mod.fetch_international_news(intl_symbols, intl_fundamentals_data)
+                if intl_portfolio_summary['missing_symbols']:
+                    logger.warning(
+                        f"International portfolio: no live data today for "
+                        f"{', '.join(intl_portfolio_summary['missing_symbols'])}"
+                    )
+        except Exception as e:
+            logger.warning(f"International portfolio tracking skipped: {e}")
+
         # ---- Individual reports (only if --detailed) ----
         report_files = {}
         if args.detailed:
@@ -327,6 +383,10 @@ def main():
             portfolio_news=portfolio_news,
             portfolio_history_tracker=portfolio_history_tracker,
             bond_portfolio=bond_portfolio,
+            intl_portfolio_summary=intl_portfolio_summary,
+            intl_portfolio_history=intl_portfolio_history_rows,
+            intl_portfolio_news=intl_portfolio_news,
+            intl_portfolio_history_tracker=intl_portfolio_history_tracker,
         )
 
         # ---- Email ----

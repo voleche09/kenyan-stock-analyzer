@@ -1,0 +1,20 @@
+{
+  "_comment": "This is an EXAMPLE. Your real holdings live in portfolio/international_holdings.json, which is gitignored and never committed. Copy this file and edit it, or run:  python3 add_international_holding.py SYMBOL QUANTITY BUY_PRICE_USD [BUY_DATE]",
+
+  "holdings": [
+    {
+      "symbol": "AAPL",
+      "quantity": 10,
+      "buy_price": 190.25,
+      "buy_date": "2026-03-14",
+      "note": "Example lot — price is in USD, not KES"
+    },
+    {
+      "symbol": "MSFT",
+      "quantity": 5,
+      "buy_price": 410.00,
+      "buy_date": null,
+      "note": "buy_date is optional — leave it null if you don't remember exactly when you bought"
+    }
+  ]
+}

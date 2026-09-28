@@ -985,7 +985,9 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                        report_files=None, fundamentals_data=None,
                        validations=None, scores=None, alerts=None, usd_kes=None,
                        portfolio_summary=None, portfolio_history=None, portfolio_news=None,
-                       portfolio_history_tracker=None, bond_portfolio=None):
+                       portfolio_history_tracker=None, bond_portfolio=None,
+                       intl_portfolio_summary=None, intl_portfolio_history=None,
+                       intl_portfolio_news=None, intl_portfolio_history_tracker=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -1113,6 +1115,9 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             portfolio_summary=portfolio_summary, portfolio_history=portfolio_history,
             portfolio_news=portfolio_news, portfolio_history_tracker=portfolio_history_tracker,
             bond_portfolio=bond_portfolio,
+            intl_portfolio_summary=intl_portfolio_summary, intl_portfolio_history=intl_portfolio_history,
+            intl_portfolio_news=intl_portfolio_news,
+            intl_portfolio_history_tracker=intl_portfolio_history_tracker,
         )
         return index_path
 
@@ -2792,6 +2797,83 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         ax.set_xticklabels([dates[i] for i in range(0, len(dates), step)], rotation=30, ha='right')
         return self._fig_to_b64()
 
+    # ---- International (US) portfolio charts — same style, USD instead of KES ----
+    def _make_intl_portfolio_allocation_chart(self, sector_allocation):
+        """Donut chart: international portfolio market value by sector (or
+        'ETF' for holdings like an ETF that has no single company sector)."""
+        if not sector_allocation:
+            return None
+        items = sorted(sector_allocation.items(), key=lambda kv: kv[1], reverse=True)
+        labels = [k for k, _ in items]
+        values = [v for _, v in items]
+        palette = ['#2563eb', '#16a34a', '#f59e0b', '#8b5cf6', '#ef4444',
+                  '#0ea5e9', '#ec4899', '#84cc16', '#64748b']
+        colors = [palette[i % len(palette)] for i in range(len(items))]
+        fig, ax = plt.subplots(figsize=(6.2, 5.4))
+        wedges, _, autotexts = ax.pie(
+            values, labels=None, autopct=lambda p: f'{p:.0f}%' if p >= 4 else '',
+            startangle=90, colors=colors, pctdistance=0.78,
+            wedgeprops=dict(width=0.42, edgecolor='white', linewidth=2))
+        for t in autotexts:
+            t.set_fontsize(9); t.set_fontweight('bold'); t.set_color('white')
+        total = sum(values)
+        ax.text(0, 0, f"${total/1e3:.1f}K", ha='center', va='center',
+                fontsize=13, fontweight='bold')
+        ax.legend(wedges, [f'{l} ({v/total*100:.0f}%)' for l, v in items],
+                  loc='center left', bbox_to_anchor=(1.0, 0.5), fontsize=9, frameon=False)
+        ax.set_title('International Portfolio by Sector', fontsize=13, fontweight='bold')
+        return self._fig_to_b64()
+
+    def _make_intl_portfolio_gainloss_chart(self, holdings):
+        """Horizontal bar: unrealized gain/loss % per international holding."""
+        avail = [h for h in holdings if h.get('data_available') and h.get('gain_pct') is not None]
+        if not avail:
+            return None
+        avail = sorted(avail, key=lambda h: h['gain_pct'])
+        syms = [h['symbol'] for h in avail]
+        pcts = [h['gain_pct'] for h in avail]
+        colors = [COLORS['bullish'] if p >= 0 else COLORS['bearish'] for p in pcts]
+        fig, ax = plt.subplots(figsize=(9, max(3, 0.55 * len(avail))))
+        bars = ax.barh(syms, pcts, color=colors, alpha=0.88)
+        for bar, val in zip(bars, pcts):
+            ax.text(bar.get_width() + (1 if val >= 0 else -1),
+                    bar.get_y() + bar.get_height() / 2, f'{val:+.1f}%',
+                    va='center', ha='left' if val >= 0 else 'right',
+                    fontsize=9, fontweight='bold',
+                    color='#166534' if val >= 0 else '#991b1b')
+        ax.axvline(x=0, color='#334155', linewidth=0.8)
+        ax.set_title('International: Unrealized Gain / Loss by Holding (%)', fontsize=13, fontweight='bold')
+        ax.set_xlabel('% since your average cost')
+        ax.grid(True, alpha=0.3, axis='x')
+        return self._fig_to_b64()
+
+    def _make_intl_portfolio_value_chart(self, history_rows, cost_basis=None):
+        """Line chart of total international portfolio market value (USD)
+        over time, from REAL recorded daily snapshots only — never
+        interpolated. Returns None if fewer than 2 days are recorded yet."""
+        if not history_rows or len(history_rows) < 2:
+            return None
+        dates = [r['date'] for r in history_rows]
+        values = [r['market_value'] for r in history_rows]
+        fig, ax = plt.subplots(figsize=(11, 4.2))
+        ax.plot(dates, values, marker='o', markersize=4, color=COLORS['price'],
+                linewidth=1.8, label='Portfolio market value')
+        ax.fill_between(range(len(dates)), values, alpha=0.08, color=COLORS['price'])
+        if cost_basis:
+            ax.axhline(y=cost_basis, color=COLORS['sma50'], linestyle='--', linewidth=1.2,
+                       label=f'Your cost basis (${cost_basis:,.0f})')
+        ax.set_title('International Portfolio Value Over Time (recorded each day you run the tool)',
+                     fontsize=13, fontweight='bold')
+        ax.set_ylabel('USD')
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(
+            lambda x, p: f'${x/1e3:.1f}K' if abs(x) >= 1e3 else f'${x:.0f}'))
+        ax.legend(loc='upper left', fontsize=9)
+        ax.grid(True, alpha=0.3)
+        step = max(1, len(dates) // 12)
+        ax.set_xticks(range(0, len(dates), step))
+        ax.set_xticklabels([dates[i] for i in range(0, len(dates), step)], rotation=30, ha='right')
+        return self._fig_to_b64()
+
     def _portfolio_holding_tip(self, h):
         """Rich hover preview for one portfolio holding — cost, live value,
         gain, dividend, and the same transparent score breakdown used
@@ -2838,39 +2920,71 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                  "the same one shown throughout this dashboard. Not personalized advice.</div>")
         return "".join(p).replace("&", "&amp;").replace('"', "&quot;")
 
-    def _build_networth_glance(self, portfolio_summary, bond_portfolio):
+    def _build_networth_glance(self, portfolio_summary, bond_portfolio,
+                               intl_portfolio_summary=None, usd_kes=None):
         """
         Combined "at a glance" hero for the top of My Portfolio — total net
-        worth across stocks + bonds together, before either section's own
-        detail. Deliberately honest about what each half actually is:
-        stocks' value is a real, verified market price; bonds' value is an
-        INDICATIVE par-based figure (see bonds_portfolio.py's own docstring)
-        since Kenya's secondary bond market has no live retail quote feed.
-        These are never blended into one misleading "market value" — the
-        split is always shown, and the combined total is clearly labelled.
-        Returns '' if neither exists (each page's own empty state covers it).
+        worth across stocks + bonds + international stocks together, before
+        any section's own detail. Deliberately honest about what each piece
+        actually is: stocks' and international stocks' values are real,
+        verified market prices; bonds' value is an INDICATIVE par-based
+        figure (see bonds_portfolio.py's own docstring) since Kenya's
+        secondary bond market has no live retail quote feed. These are never
+        blended into one misleading "market value" — the split is always
+        shown, and the combined total is clearly labelled.
+
+        International holdings are in USD; converting them into the KES
+        total uses market_context.fetch_usd_kes()'s rate for THIS run only
+        (passed in as usd_kes) — never a stale or invented rate. If that
+        rate wasn't fetched, the international sleeve is shown in USD in its
+        own card but EXCLUDED from the combined KES total, with a visible
+        note explaining why, rather than guessing. The total is also shown
+        in USD (back-computed from the KES total via the same rate) so both
+        currencies are always visible together, per the user's request.
+
+        Returns '' if none of the three exist (each page's own empty state covers it).
         """
         has_stocks = bool(portfolio_summary)
         has_bonds = bool(bond_portfolio)
-        if not has_stocks and not has_bonds:
+        has_intl = bool(intl_portfolio_summary)
+        if not has_stocks and not has_bonds and not has_intl:
             return ''
 
         stocks_value = portfolio_summary['totals']['market_value'] if has_stocks else 0.0
         stocks_cost = portfolio_summary['totals']['cost_basis'] if has_stocks else 0.0
         stocks_gain = portfolio_summary['totals']['gain'] if has_stocks else 0.0
-        stocks_day = portfolio_summary['totals'].get('day_change_value') if has_stocks else None
         stocks_day_pct = portfolio_summary['totals'].get('day_change_pct') if has_stocks else None
 
         bonds_value = bond_portfolio['totals']['indicative_value_par'] if has_bonds else 0.0
         bonds_cost = bond_portfolio['totals']['cost_basis'] if has_bonds else 0.0
         bonds_income = bond_portfolio['totals']['annual_after_tax_income'] if has_bonds else 0.0
 
-        total_value = stocks_value + bonds_value
-        total_cost = stocks_cost + bonds_cost
-        total_gain = total_value - total_cost
-        total_gain_pct = (total_gain / total_cost * 100.0) if total_cost else None
-        stocks_pct_of_total = (stocks_value / total_value * 100.0) if total_value else 0.0
-        bonds_pct_of_total = 100.0 - stocks_pct_of_total if total_value else 0.0
+        fx_rate = usd_kes.get('rate') if usd_kes else None
+        intl_value_usd = intl_portfolio_summary['totals']['market_value'] if has_intl else 0.0
+        intl_cost_usd = intl_portfolio_summary['totals']['cost_basis'] if has_intl else 0.0
+        intl_gain_usd = intl_portfolio_summary['totals']['gain'] if has_intl else 0.0
+        intl_day_pct = intl_portfolio_summary['totals'].get('day_change_pct') if has_intl else None
+
+        intl_fx_missing = has_intl and not fx_rate
+        if has_intl and fx_rate:
+            intl_value_kes = intl_value_usd * fx_rate
+            intl_cost_kes = intl_cost_usd * fx_rate
+        elif has_intl:
+            intl_value_kes = None  # excluded from the KES total below — see docstring
+            intl_cost_kes = None
+        else:
+            intl_value_kes = 0.0
+            intl_cost_kes = 0.0
+
+        kes_total_value = stocks_value + bonds_value + (intl_value_kes or 0.0)
+        kes_total_cost = stocks_cost + bonds_cost + (intl_cost_kes or 0.0)
+        kes_total_gain = kes_total_value - kes_total_cost
+        kes_total_gain_pct = (kes_total_gain / kes_total_cost * 100.0) if kes_total_cost else None
+        usd_total_value = (kes_total_value / fx_rate) if fx_rate else None
+
+        stocks_pct = (stocks_value / kes_total_value * 100.0) if kes_total_value else 0.0
+        bonds_pct = (bonds_value / kes_total_value * 100.0) if kes_total_value else 0.0
+        intl_pct = ((intl_value_kes or 0.0) / kes_total_value * 100.0) if kes_total_value else 0.0
 
         def stocks_block():
             if not has_stocks:
@@ -2887,7 +3001,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 f'<div class="nw-row"><span>Gain / loss</span><b style="color:{gain_color}">'
                 f'KES {stocks_gain:+,.0f}</b></div>'
                 f'<div class="nw-row"><span>Today</span><b style="color:{day_color}">{day_txt}</b></div>'
-                f'<div class="nw-row"><span>Share of net worth</span><b>{stocks_pct_of_total:.0f}%</b></div>'
+                f'<div class="nw-row"><span>Share of net worth</span><b>{stocks_pct:.0f}%</b></div>'
                 '</div>')
 
         def bonds_block():
@@ -2902,31 +3016,70 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 f'<div class="nw-row"><span>Annual income (after tax)</span><b style="color:#4ade80">'
                 f'KES {bonds_income:,.0f}</b></div>'
                 '<div class="nw-row"><span>Today</span><b style="color:#94a3b8;">n/a — see note</b></div>'
-                f'<div class="nw-row"><span>Share of net worth</span><b>{bonds_pct_of_total:.0f}%</b></div>'
+                f'<div class="nw-row"><span>Share of net worth</span><b>{bonds_pct:.0f}%</b></div>'
+                '</div>')
+
+        def intl_block():
+            if not has_intl:
+                return ('<div class="nw-card"><h4>🌍 International</h4>'
+                        '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
+                        '<code style="color:#93c5fd;">python3 add_international_holding.py GOOG 7 264.06</code></p></div>')
+            day_txt = f'{intl_day_pct:+.2f}%' if intl_day_pct is not None else '—'
+            day_color = '#4ade80' if (intl_day_pct or 0) >= 0 else '#f87171'
+            gain_color = '#4ade80' if intl_gain_usd >= 0 else '#f87171'
+            kes_sub = f' <span style="color:#94a3b8;font-weight:400;">(KES {intl_value_kes:,.0f})</span>' if intl_value_kes is not None else ''
+            return (
+                '<div class="nw-card"><h4>🌍 International <a href="#intl-top" style="float:right;'
+                'font-size:0.7rem;color:#93c5fd;">jump ↓</a></h4>'
+                f'<div class="nw-row"><span>Market value</span><b>${intl_value_usd:,.0f}{kes_sub}</b></div>'
+                f'<div class="nw-row"><span>Gain / loss</span><b style="color:{gain_color}">'
+                f'{"-" if intl_gain_usd < 0 else "+"}${abs(intl_gain_usd):,.0f}</b></div>'
+                f'<div class="nw-row"><span>Today</span><b style="color:{day_color}">{day_txt}</b></div>'
+                f'<div class="nw-row"><span>Share of net worth</span><b>{intl_pct:.0f}%'
+                + (' *' if intl_fx_missing else '') + '</b></div>'
                 '</div>')
 
         gain_sub = ''
-        if total_cost:
-            gain_color = '#4ade80' if total_gain >= 0 else '#f87171'
+        if kes_total_cost:
+            gain_color = '#4ade80' if kes_total_gain >= 0 else '#f87171'
             gain_sub = (f'<span style="color:{gain_color};font-weight:700;">'
-                       f'{"+" if total_gain >= 0 else ""}KES {total_gain:,.0f} '
-                       f'({total_gain_pct:+.1f}%)</span> vs. KES {total_cost:,.0f} you put in')
+                       f'{"+" if kes_total_gain >= 0 else ""}KES {kes_total_gain:,.0f} '
+                       f'({kes_total_gain_pct:+.1f}%)</span> vs. KES {kes_total_cost:,.0f} you put in')
+
+        usd_line = (f'<div style="font-size:1.4rem;font-weight:700;color:#93c5fd;margin-top:2px;">'
+                   f'≈ ${usd_total_value:,.0f} USD</div>' if usd_total_value is not None else '')
+
+        fx_note = ''
+        if fx_rate:
+            fx_as_of = (intl_portfolio_summary.get('fx_as_of') if has_intl else None) or (usd_kes or {}).get('updated', '')
+            fx_note = (f'<div style="font-size:0.7rem;color:#64748b;margin-top:6px;">'
+                      f'USD/KES {fx_rate:.2f}{f" · {fx_as_of}" if fx_as_of else ""}</div>')
+        if intl_fx_missing:
+            fx_note += ('<div style="font-size:0.7rem;color:#f59e0b;margin-top:2px;">'
+                       '⚠️ * FX rate unavailable this run — international holdings are shown in USD only '
+                       'and excluded from the combined KES total above (not guessed at a stale rate).</div>')
 
         return (
             '<div class="networth-hero">'
-            '<div class="nw-total-label">💰 Total Net Worth — Stocks + Bonds, Today</div>'
-            f'<div class="nw-total-value">KES {total_value:,.0f}</div>'
+            '<div class="nw-total-label">💰 Total Net Worth — Stocks + Bonds + International, Today</div>'
+            f'<div class="nw-total-value">KES {kes_total_value:,.0f}</div>'
+            f'{usd_line}'
             f'<div class="nw-total-sub">{gain_sub}</div>'
+            f'{fx_note}'
             '<div class="networth-split">'
-            f'{stocks_block()}{bonds_block()}'
+            f'{stocks_block()}{bonds_block()}{intl_block()}'
             '</div>'
-            f'<div class="networth-bar"><div style="width:{stocks_pct_of_total:.1f}%"></div>'
-            f'<div style="width:{bonds_pct_of_total:.1f}%"></div></div>'
+            '<div class="networth-bar">'
+            f'<div style="width:{stocks_pct:.1f}%;background:#3b82f6;"></div>'
+            f'<div style="width:{bonds_pct:.1f}%;background:#16a34a;"></div>'
+            f'<div style="width:{intl_pct:.1f}%;background:#f59e0b;"></div>'
+            '</div>'
             '<div style="font-size:0.72rem;color:#94a3b8;margin-top:8px;">🔵 Stocks (real, verified market '
             'price) &nbsp; 🟢 Bonds (indicative par value — Kenya\'s secondary bond market has no live '
             'retail quote feed, so this assumes each bond is worth face value; see the bonds section for '
-            'the honest yield-sensitivity lookup). "Today" only applies to stocks — bonds don\'t reprice '
-            'daily in this model.</div>'
+            'the honest yield-sensitivity lookup) &nbsp; 🟠 International (real, verified market price, '
+            'converted from USD at the rate shown above). "Today" applies to stocks and international '
+            'holdings; bonds don\'t reprice daily in this model.</div>'
             '</div>')
 
     def _build_portfolio_body(self, portfolio_summary, history_rows=None, news=None,
@@ -3634,12 +3787,313 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         return ''.join(parts)
 
+    # ==================================================================
+    # MY INTERNATIONAL PORTFOLIO — private US-listed (USD) stock holdings.
+    # Lives on the SAME private 💼 My Portfolio page as stocks/bonds above
+    # — never its own page, never public. See international_portfolio.py.
+    # ==================================================================
+    def _intl_holding_tip(self, h):
+        """Rich hover preview for one international holding — same shape as
+        _portfolio_holding_tip, but USD figures + Wall Street analyst
+        consensus (real, sourced third-party opinion) instead of the
+        NSE-specific TradingView technical rating."""
+        if not h.get('data_available'):
+            html = (f"<div class='tt-h'><span>{h['symbol']}</span>"
+                    f"<span style='color:#f87171'>no data today</span></div>"
+                    f"<div class='tt-sub'>{h['quantity']:g} shares @ avg ${h['avg_cost']:.2f} "
+                    f"(cost ${h['cost_basis']:,.0f})</div>"
+                    "<div class='tt-note'>This stock had no live price in today's data pull — "
+                    "showing your cost basis only. Try again after the next run.</div>")
+            return html.replace("&", "&amp;").replace('"', "&quot;")
+
+        gp = h.get('gain_pct')
+        gc = '#4ade80' if (gp or 0) >= 0 else '#f87171'
+        p = [
+            f"<div class='tt-h'><span>{h['symbol']}</span>"
+            f"<span style='color:{gc}'>{gp:+.1f}%</span></div>",
+            f"<div class='tt-sub'>{h['quantity']:g} shares · avg cost ${h['avg_cost']:.2f} "
+            f"· now ${h['price']:.2f}</div>",
+            f"<div class='tt-row'><span class='tt-k'>Cost basis</span><span>${h['cost_basis']:,.0f}</span></div>",
+            f"<div class='tt-row'><span class='tt-k'>Market value</span><span>${h['market_value']:,.0f}</span></div>",
+            f"<div class='tt-row'><span class='tt-k'>Gain / loss</span>"
+            f"<span style='color:{gc}'>{'-' if h['gain'] < 0 else '+'}${abs(h['gain']):,.0f}</span></div>",
+        ]
+        if h.get('day_change_pct') is not None:
+            dc = '#4ade80' if h['day_change_pct'] >= 0 else '#f87171'
+            p.append(f"<div class='tt-row'><span class='tt-k'>Today</span>"
+                     f"<span style='color:{dc}'>{h['day_change_pct']:+.2f}%</span></div>")
+        if h.get('target_mean_price'):
+            up = h.get('target_upside_pct')
+            uc = '#4ade80' if (up or 0) >= 0 else '#f87171'
+            p.append(f"<div class='tt-row'><span class='tt-k'>Analyst target</span>"
+                     f"<span style='color:{uc}'>${h['target_mean_price']:.2f} "
+                     f"({up:+.0f}%)</span></div>")
+        if h.get('score') is not None:
+            oc = '#22c55e' if h['score'] >= 70 else '#f59e0b' if h['score'] >= 45 else '#ef4444'
+            p.append(f"<div class='tt-row'><span class='tt-k'>Factor score</span>"
+                     f"<span style='color:{oc};font-weight:800'>{h['score']}/100</span></div>")
+        p.append(f"<div class='tt-note'>{h['recommendation_label']} — Wall Street's real analyst "
+                 f"consensus ({h.get('num_analysts') or 0} analysts), not personalized advice.</div>")
+        return "".join(p).replace("&", "&amp;").replace('"', "&quot;")
+
+    def _build_intl_portfolio_body(self, intl_portfolio_summary, history_rows=None, news=None,
+                                   history_tracker=None):
+        """
+        My International Portfolio section — real US-listed holdings, USD
+        first. Same transparency discipline as _build_portfolio_body: the
+        "Rating" and "Score" per holding are real, sourced screens (Wall
+        Street consensus / the same mechanical factor score used dashboard
+        -wide) — never personalized advice.
+        """
+        history_rows = history_rows or []
+        news = news or []
+
+        if not intl_portfolio_summary:
+            return (
+                '<a id="intl-top"></a>'
+                '<div class="section"><h2>🌍 My International Portfolio</h2>'
+                '<p class="page-intro">You haven\'t added any international holdings yet. This page is '
+                '100% private — your holdings live in <code>portfolio/international_holdings.json</code> '
+                'on your own machine and are <strong>never committed to git</strong>.</p>'
+                '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
+                '<strong>Add your first position — two ways:</strong>'
+                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
+                'overflow-x:auto;font-size:0.85rem;">python3 add_international_holding.py GOOG 7 264.06</pre>'
+                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/international_holdings.json</code> '
+                'directly — see <code>portfolio/README.md</code> for the exact format.</p>'
+                '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this section fills in: '
+                'live USD value, gain/loss, dividends, analyst consensus, charts, and news.</p>'
+                '</div></div>')
+
+        parts = []
+        t = intl_portfolio_summary['totals']
+        holdings = intl_portfolio_summary['holdings']
+        as_of = intl_portfolio_summary.get('as_of', '')
+
+        parts.append(
+            '<a id="intl-top"></a>'
+            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
+            'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
+            '⚠️ <strong>Your private international portfolio — educational information, not financial '
+            'advice.</strong> Values are USD, fetched fresh every run from Yahoo Finance and run through '
+            'the exact same technical-analysis and factor-scoring engine as your NSE holdings. "Rating" is '
+            'Wall Street\'s own real analyst consensus (sourced, not invented) — not a personalized '
+            'buy/sell recommendation. This file is never committed to git; see '
+            '<code>portfolio/README.md</code>.</div>')
+
+        missing = intl_portfolio_summary.get('missing_symbols') or []
+        if missing:
+            parts.append(
+                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
+                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                f'⚠️ <strong>No live data today for: {", ".join(missing)}.</strong> '
+                'These holdings are excluded from the totals below rather than shown with a guessed '
+                'price. Try running the pipeline again.</div>')
+
+        if not t.get('fx_available'):
+            parts.append(
+                '<div style="background:#f1f5f9;border-left:6px solid #94a3b8;border-radius:8px;'
+                'padding:10px 18px;margin-bottom:18px;font-size:0.85rem;color:#475569;">'
+                'ℹ️ USD/KES exchange rate wasn\'t fetched this run — figures below are USD only '
+                '(no guessed KES conversion).</div>')
+
+        gp = t.get('gain_pct')
+        gain_cls = 'positive' if (gp or 0) >= 0 else 'negative'
+        dp = t.get('day_change_pct')
+        day_cls = 'positive' if (dp or 0) >= 0 else 'negative'
+        kes_sub = f' (KES {t["market_value_kes"]:,.0f})' if t.get('market_value_kes') is not None else ''
+        parts.append(
+            '<div class="section"><h2>🌍 My International Portfolio</h2>'
+            f'<p class="page-intro">As of {as_of} · {t["n_available"]} of {t["n_holdings"]} holding(s) '
+            'priced today · all figures in USD.</p>'
+            '<div class="stats">'
+            f'<div class="stat-card"><div class="stat-value">${t["cost_basis"]:,.0f}</div>'
+            '<div class="stat-label">Total Cost Basis</div></div>'
+            f'<div class="stat-card"><div class="stat-value">${t["market_value"]:,.0f}</div>'
+            f'<div class="stat-label">Market Value Today{kes_sub}</div></div>'
+            f'<div class="stat-card"><div class="stat-value {gain_cls}">'
+            f'{"-" if (t["gain"] or 0) < 0 else "+"}${abs(t["gain"]):,.0f}</div>'
+            f'<div class="stat-label">Total Gain / Loss'
+            + (f' ({gp:+.1f}%)' if gp is not None else '') + '</div></div>'
+            f'<div class="stat-card"><div class="stat-value {day_cls}">'
+            + (f'{dp:+.2f}%' if dp is not None else '—') + '</div>'
+            f'<div class="stat-label">Today' + (f' ({"-" if t["day_change_value"] < 0 else "+"}${abs(t["day_change_value"]):,.0f})' if t.get("day_change_value") is not None else '') + '</div></div>'
+            f'<div class="stat-card"><div class="stat-value">${t["est_annual_dividend"]:,.0f}</div>'
+            '<div class="stat-label">Est. Annual Dividend</div></div>'
+            '</div></div>')
+
+        if history_tracker is not None:
+            windows = [('1 Day', 1), ('1 Week', 7), ('1 Month', 30), ('1 Year', 365)]
+            cards = ''
+            for label, days in windows:
+                lb = history_tracker.lookback(t['market_value'], days)
+                if lb:
+                    cls = 'positive' if lb['pct_change'] >= 0 else 'negative'
+                    cards += (
+                        '<div class="stat-card">'
+                        f'<div class="stat-value {cls}">{lb["pct_change"]:+.1f}%</div>'
+                        f'<div class="stat-label">{label}</div>'
+                        f'<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">'
+                        f'since {lb["from_date"]} · {"-" if lb["change_value"] < 0 else "+"}'
+                        f'${abs(lb["change_value"]):,.0f}</div></div>')
+                else:
+                    cards += (
+                        '<div class="stat-card">'
+                        '<div class="stat-value" style="color:#cbd5e1;font-size:1.1rem;">—</div>'
+                        f'<div class="stat-label">{label}</div>'
+                        '<div style="font-size:0.7rem;color:#94a3b8;margin-top:4px;">not enough history yet</div></div>')
+            parts.append(
+                '<div class="section"><h2>📅 Performance Over Time</h2>'
+                '<p class="page-intro">Computed from real snapshots recorded each day you run this tool.</p>'
+                f'<div class="stats">{cards}</div></div>')
+
+        has_dividends = any(h.get('data_available') and h.get('dividend_rate') for h in holdings)
+        jump_links = [('#intl-charts', '📊 Charts'), ('#intl-holdings', '📋 Holdings')]
+        if has_dividends:
+            jump_links.append(('#intl-dividends', '💵 Dividends'))
+        jump_links.append(('#intl-news', '📰 News'))
+        parts.append(
+            '<div class="jumpnav"><span class="jumpnav-group">Jump to:</span>'
+            + ''.join(f'<a href="{href}">{label}</a>' for href, label in jump_links)
+            + '</div>')
+
+        chart_html = ''
+        alloc_chart = self._make_intl_portfolio_allocation_chart(intl_portfolio_summary.get('sector_allocation'))
+        gainloss_chart = self._make_intl_portfolio_gainloss_chart(holdings)
+        value_chart = self._make_intl_portfolio_value_chart(history_rows, cost_basis=t.get('cost_basis'))
+        if value_chart:
+            chart_html += (f'<img src="data:image/png;base64,{value_chart}" class="chart-img" '
+                           'alt="International portfolio value over time">')
+        else:
+            chart_html += (
+                '<div class="dq-note" style="margin-bottom:14px;">📈 Value chart will appear once '
+                'you\'ve run this tool on at least 2 different days.</div>')
+        two_up = ''
+        if alloc_chart:
+            two_up += f'<div><img src="data:image/png;base64,{alloc_chart}" class="chart-img" alt="Sector allocation"></div>'
+        if gainloss_chart:
+            two_up += f'<div><img src="data:image/png;base64,{gainloss_chart}" class="chart-img" alt="Gain/loss by holding"></div>'
+        if two_up:
+            chart_html += f'<div class="grid-2" style="margin-top:14px;">{two_up}</div>'
+        parts.append(f'<div class="section" id="intl-charts"><h2>📊 International Portfolio Charts</h2>{chart_html}</div>')
+
+        rows = ''
+        for h in sorted(holdings, key=lambda x: (x['market_value'] or -1), reverse=True):
+            link = h.get('report_file') or '#'
+            tip = self._intl_holding_tip(h)
+            if not h['data_available']:
+                rows += (
+                    f'<tr data-tip="{tip}" style="opacity:0.55;">'
+                    f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                    f'<td>{h["quantity"]:,.0f}</td><td>{h["avg_cost"]:.2f}</td>'
+                    '<td colspan="8" style="color:#dc2626;">No live data today — see warning above</td></tr>')
+                continue
+            gp2 = h['gain_pct']
+            gcls = 'positive' if gp2 >= 0 else 'negative'
+            dcls = 'positive' if (h.get('day_change_pct') or 0) >= 0 else 'negative'
+            sc = h.get('score')
+            sc_cls = 'score-high' if (sc or 0) >= 70 else 'score-mid' if (sc or 0) >= 45 else 'score-low'
+            sc_html = f'<span class="score {sc_cls} hint">{sc}</span>' if sc is not None else '—'
+            rows += (
+                f'<tr data-tip="{tip}">'
+                f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a> '
+                f'<span style="color:#94a3b8;font-size:0.75rem;">{h["name"]}</span></td>'
+                f'<td>{h["quantity"]:,.0f}</td>'
+                f'<td>{h["avg_cost"]:.2f}</td>'
+                f'<td>{h["price"]:.2f}</td>'
+                f'<td>{h["market_value"]:,.0f}</td>'
+                f'<td class="{gcls}">{h["gain"]:+,.0f}</td>'
+                f'<td class="{gcls}">{gp2:+.1f}%</td>'
+                f'<td class="{dcls}">' + (f'{h["day_change_pct"]:+.2f}%' if h.get('day_change_pct') is not None else '—') + '</td>'
+                f'<td><span class="badge {h["recommendation_class"]}">{h["recommendation_label"]}</span></td>'
+                f'<td>{sc_html}</td></tr>')
+        sort_th = lambda label, typ='number', title='': (
+            f'<th class="sortable" data-sort-type="{typ}" onclick="sortTable(this)"'
+            + (f' title="{title}"' if title else '') + f'>{label}</th>')
+        parts.append(
+            '<div class="section" id="intl-holdings"><h2>📋 Your International Holdings</h2>'
+            '<p class="dq-note" style="margin-bottom:12px;">💡 Click any column header to sort. Hover a '
+            'row for the full breakdown. "Rating" is Wall Street\'s real analyst consensus for that '
+            'stock — not your personal return (that\'s the "Gain %" column).</p>'
+            '<div class="table-wrap"><table id="intlTable"><thead><tr>'
+            + sort_th('Symbol', 'text') + sort_th('Qty') + sort_th('Avg Cost')
+            + sort_th('Price') + sort_th('Value ($)') + sort_th('Gain ($)')
+            + sort_th('Gain %') + sort_th('Today')
+            + sort_th('Rating', 'signal', "Wall Street's real analyst consensus")
+            + sort_th('Score', 'number', '0-100 transparent factor screen — hover for the breakdown')
+            + f'</tr></thead><tbody>{rows}</tbody></table></div></div>')
+
+        div_rows = ''
+        for h in sorted(holdings, key=lambda x: (x.get('est_annual_dividend') or 0), reverse=True):
+            if not h['data_available'] or not h.get('dividend_rate'):
+                continue
+            dy_txt = f"{h['dividend_yield']:.2f}%" if h.get('dividend_yield') is not None else '—'
+            div_rows += (
+                f'<tr><td><strong>{h["symbol"]}</strong></td>'
+                f'<td>${h["dividend_rate"]:.2f}/share/yr</td>'
+                f'<td>{dy_txt}</td>'
+                f'<td>${(h.get("est_annual_dividend") or 0):,.0f}/yr</td></tr>')
+        if div_rows:
+            parts.append(
+                '<details class="section-details" id="intl-dividends"><summary>'
+                '<h2>💵 Dividends on Your International Holdings</h2><span class="toggle-hint"></span></summary>'
+                '<div class="details-body">'
+                '<p class="page-intro">The current annualized dividend rate per share, and what it\'s '
+                'worth on your position.</p>'
+                '<div class="table-wrap"><table><thead><tr>'
+                '<th>Symbol</th><th>Per Share (annualized)</th><th>Yield</th>'
+                '<th>Your Est. Income</th></tr></thead>'
+                f'<tbody>{div_rows}</tbody></table></div></div></details>')
+
+        if news:
+            cards = ''
+            for n in news[:24]:
+                cards += (
+                    f'<div class="explain-card"><h4>{n["symbol"]} '
+                    f'<span style="font-weight:400;color:#94a3b8;font-size:0.75rem;">· {n.get("source","")}</span></h4>'
+                    f'<p><a href="{n["url"]}" target="_blank" rel="noopener" style="color:#1e293b;text-decoration:none;">{n["title"]}</a></p>'
+                    f'<p class="eg" style="color:#94a3b8;">📅 {n.get("published_utc","")}</p></div>')
+            parts.append(
+                '<details class="section-details" id="intl-news"><summary>'
+                f'<h2>📰 News on Your International Holdings <span style="font-weight:400;font-size:0.7rem;'
+                f'color:#94a3b8;">({len(news)} recent)</span></h2>'
+                '<span class="toggle-hint"></span></summary><div class="details-body">'
+                '<p class="page-intro">Headlines mentioning companies you hold, newest first. '
+                '<strong>Shown neutral, on purpose</strong> — read the headline and judge for yourself. '
+                'The "Today" column and analyst Rating are the closest real, verified signals this '
+                'dashboard can offer.</p>'
+                f'<div class="explain-grid">{cards}</div></div></details>')
+        else:
+            parts.append(
+                '<details class="section-details" id="intl-news"><summary>'
+                '<h2>📰 News on Your International Holdings</h2><span class="toggle-hint"></span></summary>'
+                '<div class="details-body"><p class="page-intro">No recent headlines found for these '
+                'companies. Try again next run.</p></div></details>')
+
+        parts.append(
+            '<details class="section-details"><summary>'
+            '<h2>➕ Add a New International Position</h2><span class="toggle-hint"></span></summary>'
+            '<div class="details-body">'
+            '<p class="page-intro">Every time you buy — even more of a stock you already hold:</p>'
+            '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
+            'overflow-x:auto;font-size:0.85rem;">python3 add_international_holding.py SYMBOL QUANTITY PRICE_USD [DATE]\n'
+            'python3 add_international_holding.py GOOG 7 264.06\n'
+            'python3 add_international_holding.py GOOG 7 264.06 2026-09-20</pre>'
+            '<div class="dq-note">Multiple purchases of the same stock combine automatically into one row '
+            'with a correctly weighted average cost. Full details in portfolio/README.md. Nothing here is '
+            'ever committed to git.</div></div></details>')
+
+        return ''.join(parts)
+
     def _build_dashboard_pages(self, stocks, gainers, losers, sectors, breadth,
                                sector_chart, bullish, bearish, neutral, total,
                                data_date=None, alerts=None, usd_kes=None,
                                portfolio_summary=None, portfolio_history=None,
                                portfolio_news=None, portfolio_history_tracker=None,
-                               bond_portfolio=None):
+                               bond_portfolio=None, intl_portfolio_summary=None,
+                               intl_portfolio_history=None, intl_portfolio_news=None,
+                               intl_portfolio_history_tracker=None):
         """
         Build the multi-page dashboard: a clean Overview plus grouped detail
         pages (Technicals, Fundamentals, Dividends, Sectors, Data Quality).
@@ -4054,17 +4508,22 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         bonds_body = self._build_bonds_body()
 
         # ---- MY PORTFOLIO page (private — empty state if not set up) ----
-        # Combined Stocks+Bonds "at a glance" net worth first (most important,
-        # zero scrolling), then the full stock section, then the full bond
-        # section — both live on this one private page, per the same
-        # never-committed portfolio/ directory discipline.
+        # Combined Stocks+Bonds+International "at a glance" net worth first
+        # (most important, zero scrolling), then each full section — all
+        # three live on this one private page, per the same never-committed
+        # portfolio/ directory discipline.
         portfolio_body = (
-            self._build_networth_glance(portfolio_summary, bond_portfolio)
+            self._build_networth_glance(portfolio_summary, bond_portfolio,
+                                        intl_portfolio_summary=intl_portfolio_summary, usd_kes=usd_kes)
             + self._build_portfolio_body(
                 portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
                 history_tracker=portfolio_history_tracker, bond_portfolio=bond_portfolio,
             )
             + self._build_bonds_holdings_body(bond_portfolio, portfolio_summary=portfolio_summary)
+            + self._build_intl_portfolio_body(
+                intl_portfolio_summary, history_rows=intl_portfolio_history, news=intl_portfolio_news,
+                history_tracker=intl_portfolio_history_tracker,
+            )
         )
 
         # ---- Assemble & write all pages ----

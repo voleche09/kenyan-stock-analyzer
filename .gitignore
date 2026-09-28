@@ -55,3 +55,8 @@ portfolio/history.json
 # Never committed. Only bonds.example.json and README.md are tracked.
 portfolio/bonds.json
 portfolio/bonds_history.json
+
+# Personal international (US) stock portfolio — YOUR real holdings and cost basis.
+# Never committed. Only international_holdings.example.json and README.md are tracked.
+portfolio/international_holdings.json
+portfolio/international_history.json
