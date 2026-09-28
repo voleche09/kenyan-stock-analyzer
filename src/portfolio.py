@@ -326,10 +326,13 @@ class PortfolioHistoryTracker:
     yet", never a guess.
     """
 
-    def __init__(self, portfolio_dir):
+    def __init__(self, portfolio_dir, history_filename=None):
         self.dir = portfolio_dir
         os.makedirs(self.dir, exist_ok=True)
-        self.path = os.path.join(self.dir, HISTORY_FILE)
+        # history_filename lets a sibling tracker (e.g. international_portfolio.py)
+        # reuse this exact lookback/snapshot logic against its OWN file, instead
+        # of colliding with the stock portfolio's history.json.
+        self.path = os.path.join(self.dir, history_filename or HISTORY_FILE)
 
     def record_snapshot(self, portfolio_summary, date=None):
         if not portfolio_summary:

@@ -20,6 +20,8 @@ portfolio/holdings.json
 portfolio/bonds.json
 portfolio/history.json
 portfolio/bonds_history.json
+portfolio/international_holdings.json
+portfolio/international_history.json
 
 # ---- Local Python environment ----
 venv/

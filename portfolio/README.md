@@ -1,22 +1,28 @@
 # My Portfolio — private, never committed
 
-This folder holds **your real stock and bond holdings**. It is deliberately
-kept out of git: `holdings.json`, `history.json`, `bonds.json` and
-`bonds_history.json` are all listed in `.gitignore`, so they will never be
-committed, pushed, or visible to anyone you share this repo with — including
-in commit history, pull requests, or merge diffs. Only this README and the
-two `*.example.json` templates are tracked in git.
+This folder holds **your real stock, bond and international-stock
+holdings**. It is deliberately kept out of git: `holdings.json`,
+`history.json`, `bonds.json`, `bonds_history.json`,
+`international_holdings.json` and `international_history.json` are all
+listed in `.gitignore` (and `.dockerignore`, for the Docker install), so they
+will never be committed, pushed, baked into a Docker image, or visible to
+anyone you share this repo with — including in commit history, pull
+requests, or merge diffs. Only this README and the `*.example.json`
+templates are tracked in git.
 
 ## Files
 
 | File | Tracked in git? | What it is |
 |---|---|---|
-| `holdings.json` | **No — private** | Your real stock purchases (symbol, quantity, price paid). |
-| `history.json` | **No — private** | Auto-generated stock portfolio value snapshots. Never edit by hand. |
-| `holdings.example.json` | Yes | A template showing the stock format, with fake data. |
+| `holdings.json` | **No — private** | Your real NSE stock purchases (symbol, quantity, price paid in KES). |
+| `history.json` | **No — private** | Auto-generated NSE stock portfolio value snapshots. Never edit by hand. |
+| `holdings.example.json` | Yes | A template showing the NSE stock format, with fake data. |
 | `bonds.json` | **No — private** | Your real Treasury/Infrastructure bond holdings (issue code, face value, what you paid). See **Bonds** below. |
 | `bonds_history.json` | **No — private** | Reserved for future use (bond values don't need daily snapshots the way stock prices do — a bond's cash flows are already fully known in advance). |
 | `bonds.example.json` | Yes | A template showing the bond format, with fake data. |
+| `international_holdings.json` | **No — private** | Your real US-listed stock purchases (symbol, quantity, price paid **in USD**). See **International Stocks** below. |
+| `international_history.json` | **No — private** | Auto-generated international portfolio value snapshots (USD). Never edit by hand. |
+| `international_holdings.example.json` | Yes | A template showing the international stock format, with fake data. |
 
 ## Stocks
 
@@ -97,14 +103,65 @@ just add the fact of what you hold and the dashboard computes everything
 else (accrued interest, next payment, full cash-flow calendar, after-tax
 income, running yield) deterministically.
 
+## International Stocks
+
+Your real US-listed stock holdings, in **USD**. Same idea as the NSE
+`holdings.json` above, just a separate file and a separate currency.
+
+**Easiest — one command, from the project root:**
+
+```bash
+python3 add_international_holding.py GOOG 7 264.06
+```
+
+That adds a new lot: 7 shares of GOOG bought at $264.06/share, dated today.
+Add a purchase date if you want it recorded exactly:
+
+```bash
+python3 add_international_holding.py GOOG 7 264.06 2026-09-20
+```
+
+Run it again any time you buy more — it does **not** overwrite anything, it
+adds a new lot; multiple lots of the same symbol combine automatically into
+one row with a correctly weighted average cost.
+
+**Or edit the file directly.** Create `portfolio/international_holdings.json`
+(copy `international_holdings.example.json` if it doesn't exist yet) and add
+a new object to the `holdings` array:
+
+```json
+{"symbol": "GOOG", "quantity": 7, "buy_price": 264.06, "buy_date": "2026-09-20", "note": "optional note"}
+```
+
+- `symbol` — the US ticker, e.g. `GOOG`, `INTC`, `UBER`. Any valid Yahoo
+  Finance ticker works — nothing is restricted to a fixed watchlist the way
+  NSE stocks are.
+- `quantity` — number of shares.
+- `buy_price` — price you paid per share, **in USD** — your cost, not
+  today's market price (fetched live every run, from Yahoo Finance).
+- `buy_date` — `"YYYY-MM-DD"`, or `null` if you don't know/remember it.
+- `note` — anything you want, purely for your own reference.
+
+Everything else — current price, market value, gain/loss, sector, dividend
+yield, Wall Street analyst consensus (rating + price target), technical
+signals, factor score, news — is fetched fresh every run from Yahoo Finance
+and run through the exact same `AnalysisEngine`/`scoring.py` used for your
+NSE holdings. The combined "Net Worth" hero at the top of this page converts
+your international total into KES using the same live USD/KES rate shown
+throughout this dashboard (never a stale or invented one) — if that rate
+isn't available on a given run, your international total is shown in USD
+only, with a note, rather than guessed.
+
 ## Why nothing is committed to git
 
-Your cost basis and holdings — stocks and bonds — are your private financial
-information. This project can be pushed to GitHub, shared, or open-sourced
-without ever exposing what you own or what you paid for it — the
-`.gitignore` rules keep `holdings.json`, `history.json`, `bonds.json` and
-`bonds_history.json` on your machine only, and out of every commit, PR and
-merge from day one.
+Your cost basis and holdings — stocks, bonds and international stocks — are
+your private financial information. This project can be pushed to GitHub,
+shared, or open-sourced without ever exposing what you own or what you paid
+for it — the `.gitignore`/`.dockerignore` rules keep `holdings.json`,
+`history.json`, `bonds.json`, `bonds_history.json`,
+`international_holdings.json` and `international_history.json` on your
+machine only, and out of every commit, PR, merge and Docker image from day
+one.
 
 If you use the GitHub Actions daily-email workflow and want your portfolio
 included in *that* automated email too (not just when you run the tool
