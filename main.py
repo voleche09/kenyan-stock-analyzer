@@ -356,6 +356,33 @@ def main():
                         fname = os.path.basename(path) if isinstance(path, str) else os.path.basename(path[0])
                         report_files[symbol] = fname
 
+        # ---- Individual international stock reports (always, when holdings exist) ----
+        # Unlike NSE's --detailed gate: there are only a handful of international
+        # holdings, so the cost is low, and the user wants these pages directly
+        # rather than as an opt-in flag.
+        intl_report_files = {}
+        if intl_portfolio_summary:
+            logger.info("Generating individual international stock reports...")
+            try:
+                for sym in intl_symbols:
+                    result = intl_analysis_results.get(sym)
+                    if not result:
+                        continue
+                    path = report_gen.generate_international_stock_report(
+                        sym, result, report_type='html',
+                        fundamentals=intl_fundamentals_data.get(sym, {}),
+                        score=intl_scores.get(sym),
+                        dividend_history=intl_data.fetch_dividend_history(sym),
+                        earnings_calendar=intl_data.fetch_earnings_calendar(sym),
+                        news=[n for n in intl_portfolio_news if n['symbol'] == sym],
+                        usd_kes=usd_kes,
+                    )
+                    if path:
+                        fname = os.path.basename(path) if isinstance(path, str) else os.path.basename(path[0])
+                        intl_report_files[sym] = fname
+            except Exception as e:
+                logger.warning(f"Individual international stock reports skipped: {e}")
+
         # ---- Market summary ----
         logger.info("Generating market summary...")
         report_gen.generate_market_summary(
@@ -387,6 +414,7 @@ def main():
             intl_portfolio_history=intl_portfolio_history_rows,
             intl_portfolio_news=intl_portfolio_news,
             intl_portfolio_history_tracker=intl_portfolio_history_tracker,
+            intl_report_files=intl_report_files,
         )
 
         # ---- Email ----
