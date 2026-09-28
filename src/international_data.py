@@ -108,9 +108,16 @@ def fetch_fundamentals(symbol):
         price = info.get('currentPrice') or info.get('regularMarketPrice')
         roe = info.get('returnOnEquity')
         net_margin = info.get('profitMargins')
+        gross_margin = info.get('grossMargins')
+        op_margin = info.get('operatingMargins')
         payout = info.get('payoutRatio')
         de = info.get('debtToEquity')
         avg_vol = info.get('averageVolume')
+        rev_growth = info.get('revenueGrowth')
+        earnings_growth = info.get('earningsGrowth')
+        held_insiders = info.get('heldPercentInsiders')
+        held_institutions = info.get('heldPercentInstitutions')
+        ex_div_ts = info.get('exDividendDate')
 
         return {
             # ---- display ----
@@ -125,6 +132,12 @@ def fetch_fundamentals(symbol):
             'week52_low': info.get('fiftyTwoWeekLow'),
             'week52_high': info.get('fiftyTwoWeekHigh'),
             'average_volume': avg_vol,
+            'summary': info.get('longBusinessSummary'),
+            'shares_outstanding': info.get('sharesOutstanding'),
+            'held_pct_insiders': held_insiders * 100 if held_insiders is not None else None,
+            'held_pct_institutions': held_institutions * 100 if held_institutions is not None else None,
+            'ex_dividend_date': (dt.datetime.fromtimestamp(ex_div_ts).strftime('%Y-%m-%d')
+                                 if ex_div_ts else None),
             # ---- analyst consensus — real, sourced, not fabricated sentiment ----
             'target_mean_price': info.get('targetMeanPrice'),
             'target_high_price': info.get('targetHighPrice'),
@@ -136,14 +149,31 @@ def fetch_fundamentals(symbol):
             'forward_pe': info.get('forwardPE'),
             'peg_ratio': info.get('pegRatio'),
             'price_to_book': info.get('priceToBook'),
+            'price_to_sales': info.get('priceToSalesTrailing12Months'),
             'roe': roe * 100 if roe is not None else None,
             'net_margin': net_margin * 100 if net_margin is not None else None,
+            'gross_margin': gross_margin * 100 if gross_margin is not None else None,
+            'operating_margin': op_margin * 100 if op_margin is not None else None,
             'debt_to_equity': de / 100 if de is not None else None,
             'current_ratio': info.get('currentRatio'),
+            'quick_ratio': info.get('quickRatio'),
             'dividend_yield': info.get('dividendYield'),  # already percent-scale, verified live
             'dividend_rate': info.get('dividendRate'),
             'dividend_payout_ratio': payout * 100 if payout is not None else None,
             'value_traded': (avg_vol * price) if (avg_vol and price) else None,
+            # ---- extra fundamentals (richer table, same style as the NSE per-stock report) ----
+            'eps_ttm': info.get('trailingEps'),
+            'forward_eps': info.get('forwardEps'),
+            'revenue_ttm': info.get('totalRevenue'),
+            'net_income_ttm': info.get('netIncomeToCommon'),
+            'free_cash_flow_ttm': info.get('freeCashflow'),
+            'enterprise_value': info.get('enterpriseValue'),
+            'ev_to_revenue': info.get('enterpriseToRevenue'),
+            'ev_to_ebitda': info.get('enterpriseToEbitda'),
+            'total_debt': info.get('totalDebt'),
+            'total_cash': info.get('totalCash'),
+            'revenue_growth_yoy': rev_growth * 100 if rev_growth is not None else None,
+            'earnings_growth_yoy': earnings_growth * 100 if earnings_growth is not None else None,
         }
     except Exception as e:
         logger.warning(f"  Yahoo Finance fundamentals error for {symbol}: {e}")
