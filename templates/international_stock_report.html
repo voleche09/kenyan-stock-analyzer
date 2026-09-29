@@ -4,7 +4,7 @@
 {% block content %}
 <!-- Header -->
 <div class="header">
-    <h1>{{ symbol }} {% if fundamentals.name and fundamentals.name != symbol %}— {{ fundamentals.name }}{% endif %}</h1>
+    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.name and fundamentals.name != symbol %}— {{ fundamentals.name }}{% endif %}</h1>
     <div class="meta">
         Generated at {{ generated_at }} |
         {% if fundamentals.sector %}{{ fundamentals.sector }}{% if fundamentals.industry %} · {{ fundamentals.industry }}{% endif %} | {% elif fundamentals.quote_type == 'ETF' %}ETF | {% endif %}

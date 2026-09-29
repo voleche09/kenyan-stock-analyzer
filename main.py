@@ -100,6 +100,7 @@ def main():
             template_dir=config.template_dir,
             output_dir=config.report_directory,
             clean_old=False,  # reports already cleared by enforce_daily_cache
+            cache_dir=config.cache_dir,
         )
         sector_analyzer = SectorAnalyzer()
 

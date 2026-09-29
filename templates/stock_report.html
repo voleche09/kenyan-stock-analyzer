@@ -4,7 +4,7 @@
 {% block content %}
 <!-- Header -->
 <div class="header">
-    <h1>{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}</h1>
+    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}</h1>
     <div class="meta">
         Generated at {{ generated_at }} |
         Market Cap: {{ fmt_mcap(fundamentals.market_cap) }} |

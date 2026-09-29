@@ -206,6 +206,7 @@ def compute_international_portfolio(lots, analysis_results, fundamentals_data,
         holdings.append({
             "symbol": sym,
             "name": fund.get('name') or sym,
+            "website": fund.get('website'),
             "quote_type": fund.get('quote_type'),
             "quantity": qty,
             "avg_cost": round(avg_cost, 4),
