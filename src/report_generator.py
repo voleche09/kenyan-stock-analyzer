@@ -1293,43 +1293,82 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
     def _dashboard_css(self):
         """Shared stylesheet for all dashboard pages (plain string)."""
         return """<style>
+/* ===== Theme variables — light (default) + dark override =====
+   Only STRUCTURAL colours (page/card backgrounds, borders, primary/muted
+   text) are themed here. Badges, score chips, status pills and the
+   positive/negative/midv colours are deliberately left as literal hex —
+   they're already saturated pastel-bg/dark-text pills that read fine on
+   either page background (the same way badges work in most real dark-mode
+   UIs), and re-deriving ~450 of them wasn't worth the risk for this pass.
+   The header, .networth-hero and the treemap are ALREADY dark-styled
+   on purpose and stay that way in both themes. */
+:root {
+    --bg: #f1f5f9;
+    --card-bg: #ffffff;
+    --surface: #f8fafc;
+    --text: #1e293b;
+    --text-muted: #64748b;
+    --border: #e2e8f0;
+}
+:root[data-theme="dark"] {
+    --bg: #0f172a;
+    --card-bg: #1e293b;
+    --surface: #334155;
+    --text: #e2e8f0;
+    --text-muted: #94a3b8;
+    --border: #475569;
+}
+@media print {
+    /* Printing is always light, regardless of the active on-screen theme —
+       matches ink expectations and keeps the current print appearance. */
+    :root, :root[data-theme="dark"] {
+        --bg: #ffffff; --card-bg: #ffffff; --surface: #f8fafc;
+        --text: #1e293b; --text-muted: #64748b; --border: #e2e8f0;
+    }
+    body { background: white !important; }
+}
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f1f5f9; color: #1e293b; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); }
 .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
 /* Sticky top bar: header + nav stay visible while scrolling */
-.topbar { position: sticky; top: 0; z-index: 200; background: #f1f5f9; padding-top: 10px; margin: -10px 0 16px; }
+.topbar { position: sticky; top: 0; z-index: 200; background: var(--bg); padding-top: 10px; margin: -10px 0 16px; }
 .topbar.stuck { box-shadow: 0 6px 16px rgba(15,23,42,0.10); }
-.header { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 14px 22px; border-radius: 12px; margin-bottom: 10px; display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.header { background: linear-gradient(135deg, #0f172a, #1e293b); color: white; padding: 14px 22px; border-radius: 12px; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
 .header h1 { font-size: 1.4rem; }
 .header .date { color: #94a3b8; font-size: 0.82rem; }
+.header-actions { display: flex; align-items: center; gap: 10px; }
+/* Theme toggle — same dark-styled treatment in both themes (it lives on the
+   always-dark header), so it needs no theme variables of its own. */
+.theme-toggle { background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.22); color: #fff; border-radius: 20px; padding: 6px 12px; font-size: 0.85rem; cursor: pointer; line-height: 1; font-family: inherit; }
+.theme-toggle:hover { background: rgba(255,255,255,0.2); }
 /* Nav — single responsive line (horizontal scroll on small screens) */
 .nav { display: flex; flex-wrap: nowrap; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; -webkit-overflow-scrolling: touch; }
 .nav::-webkit-scrollbar { height: 6px; }
 .nav::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-.nav-item { flex: 0 0 auto; white-space: nowrap; padding: 8px 12px; border-radius: 8px; background: white; color: #334155; text-decoration: none; font-weight: 600; font-size: 0.82rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 2px solid transparent; }
+.nav-item { flex: 0 0 auto; white-space: nowrap; padding: 8px 12px; border-radius: 8px; background: var(--card-bg); color: var(--text); text-decoration: none; font-weight: 600; font-size: 0.82rem; box-shadow: 0 1px 3px rgba(0,0,0,0.06); border: 2px solid transparent; }
 .nav-item:hover { border-color: #93c5fd; }
-.nav-item.active { background: #1e293b; color: #fff; }
-.page-intro { color: #64748b; font-size: 0.9rem; margin-bottom: 16px; }
+.nav-item.active { background: #3b82f6; color: #fff; }
+.page-intro { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 16px; }
 /* Stats */
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
-.stat-card { background: white; padding: 16px; border-radius: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.stat-card { background: var(--card-bg); padding: 16px; border-radius: 10px; text-align: center; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .stat-card .stat-value { font-size: 1.8rem; font-weight: 700; }
-.stat-card .stat-label { font-size: 0.75rem; color: #64748b; text-transform: uppercase; margin-top: 4px; }
+.stat-card .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; margin-top: 4px; }
 .stat-card .bullish { color: #22c55e; } .stat-card .bearish { color: #ef4444; } .stat-card .neutral { color: #f59e0b; }
 /* Section */
-.section { background: white; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.section { background: var(--card-bg); border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
 .section h2 { font-size: 1.1rem; margin-bottom: 16px; padding-bottom: 8px; border-bottom: 2px solid #3b82f6; display: inline-block; }
 /* Table */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #e2e8f0; white-space: nowrap; }
-th { background: #f8fafc; color: #64748b; font-size: 0.7rem; text-transform: uppercase; font-weight: 600; position: sticky; top: 0; }
+th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+th { background: var(--surface); color: var(--text-muted); font-size: 0.7rem; text-transform: uppercase; font-weight: 600; position: sticky; top: 0; }
 th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
 th.sortable:hover { color: #3b82f6; }
 th.sortable::after { content: '⇅'; opacity: 0.3; margin-left: 4px; }
 th.sortable.sort-asc::after { content: '▲'; opacity: 0.85; color: #3b82f6; }
 th.sortable.sort-desc::after { content: '▼'; opacity: 0.85; color: #3b82f6; }
-tr:hover { background: #f8fafc; }
+tr:hover { background: var(--surface); }
 .stock-link { color: #3b82f6; text-decoration: none; font-weight: 600; }
 .stock-link:hover { text-decoration: underline; }
 /* Badges */
@@ -1368,10 +1407,10 @@ tr:hover { background: #f8fafc; }
 .cal-count { color: #94a3b8; font-weight: 400; }
 /* Alerts */
 .alerts-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 10px; }
-.alert-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 3px solid #3b82f6; border-radius: 8px; padding: 10px 12px; }
+.alert-card { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #3b82f6; border-radius: 8px; padding: 10px 12px; }
 .alert-card .sym { font-weight: 700; color: #3b82f6; margin-bottom: 4px; }
-.alert-card .items { font-size: 0.8rem; color: #475569; line-height: 1.5; }
-.dq-note { font-size: 0.8rem; color: #64748b; margin-top: 8px; }
+.alert-card .items { font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; }
+.dq-note { font-size: 0.8rem; color: var(--text-muted); margin-top: 8px; }
 .dq-mismatch { color: #991b1b; }
 .mcap-cell { font-size: 0.8rem; color: #475569; }
 .positive { color: #22c55e; font-weight: 600; }
@@ -1379,25 +1418,38 @@ tr:hover { background: #f8fafc; }
 .midv { color: #d97706; font-weight: 600; }
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
-.sector-card { background: #f8fafc; padding: 14px; border-radius: 8px; border: 1px solid #e2e8f0; }
+.sector-card { background: var(--surface); padding: 14px; border-radius: 8px; border: 1px solid var(--border); }
 .sector-card h3 { font-size: 0.9rem; margin-bottom: 4px; }
 .sector-change { font-size: 1.3rem; font-weight: 700; }
-.sector-detail { font-size: 0.75rem; color: #64748b; margin-top: 4px; }
-.chart-img { max-width: 100%; border-radius: 8px; margin-top: 12px; }
+.sector-detail { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; }
+/* Chart images are pre-rendered PNGs (white background, dark text — baked
+   at pipeline-run time, before the viewer's theme choice exists) — framed
+   in a theme-invariant white card so they read as an intentional "photo"
+   rather than a broken rectangle on a dark page. */
+.chart-img { max-width: 100%; border-radius: 8px; margin-top: 12px; background: #fff; padding: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
 .filter-bar { margin-bottom: 16px; display: flex; gap: 8px; flex-wrap: wrap; }
-.filter-bar input { padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 0.9rem; width: 220px; }
-.footer { text-align: center; padding: 20px; color: #94a3b8; font-size: 0.8rem; }
+.filter-bar input { padding: 8px 12px; border: 1px solid var(--border); border-radius: 6px; font-size: 0.9rem; width: 220px; background: var(--card-bg); color: var(--text); }
+.footer { text-align: center; padding: 20px; color: var(--text-muted); font-size: 0.8rem; }
 /* Plain-English explainer cards */
 .explain-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; margin-top: 6px; }
-.explain-card { background: #f8fafc; border: 1px solid #e2e8f0; border-left: 4px solid #3b82f6; border-radius: 8px; padding: 14px 16px; }
-.explain-card h4 { font-size: 0.95rem; margin-bottom: 6px; color: #1e293b; }
-.explain-card p { font-size: 0.84rem; color: #475569; line-height: 1.5; margin: 5px 0; }
+.explain-card { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid #3b82f6; border-radius: 8px; padding: 14px 16px; }
+.explain-card h4 { font-size: 0.95rem; margin-bottom: 6px; color: var(--text); }
+.explain-card p { font-size: 0.84rem; color: var(--text-muted); line-height: 1.5; margin: 5px 0; }
 .explain-card .eg { color: #0f766e; }
 .explain-card .good { color: #166534; }
 /* Fundamental cell verdicts: green = good, red = bad */
 .fgood { color: #16a34a; font-weight: 700; }
 .fmid { color: #d97706; font-weight: 700; }
 .fbad { color: #dc2626; font-weight: 700; }
+/* Reusable info/warning/danger banners (replaces ~8 previously-inline-styled
+   call sites — see _build_*_body methods) */
+.banner { border-radius: 8px; padding: 14px 18px; margin-bottom: 18px; font-size: 0.9rem; border-left: 6px solid; }
+.banner-warn { background: #fffbeb; border-left-color: #f59e0b; color: #78350f; }
+.banner-danger { background: #fee2e2; border-left-color: #dc2626; color: #7f1d1d; }
+.banner-info { background: #eff6ff; border-left-color: #3b82f6; color: #1e3a8a; }
+:root[data-theme="dark"] .banner-warn { background: #45280a; color: #fde68a; }
+:root[data-theme="dark"] .banner-danger { background: #450a0a; color: #fecaca; }
+:root[data-theme="dark"] .banner-info { background: #172554; color: #bfdbfe; }
 @media (max-width: 768px) { .grid-2 { grid-template-columns: 1fr; } }
 /* ===== Floating hover tooltip (rich preview, never clipped) ===== */
 #hovertip { position: fixed; z-index: 9999; display: none; max-width: 340px; background: #0f172a; color: #e2e8f0; border-radius: 12px; padding: 12px 14px; font-size: 0.78rem; line-height: 1.5; box-shadow: 0 10px 34px rgba(2,6,23,0.4); pointer-events: none; }
@@ -1431,11 +1483,11 @@ tr:hover { background: #f8fafc; }
 .hbar-row { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 0.82rem; }
 .hbar-label { width: 60px; font-weight: 700; flex: 0 0 auto; }
 .hbar-label a { color: #3b82f6; text-decoration: none; }
-.hbar-track { flex: 1; background: #f1f5f9; border-radius: 5px; overflow: hidden; height: 20px; }
+.hbar-track { flex: 1; background: var(--surface); border-radius: 5px; overflow: hidden; height: 20px; }
 .hbar-fill { height: 100%; border-radius: 5px; min-width: 2px; transition: width .3s ease; }
 .hbar-val { width: 78px; text-align: right; flex: 0 0 auto; font-variant-numeric: tabular-nums; font-weight: 600; }
 .dbar { display: grid; grid-template-columns: 60px 1fr 70px; align-items: center; gap: 6px; margin: 3px 0; font-size: 0.82rem; }
-.dbar .dbar-track { position: relative; height: 20px; background: #f8fafc; border-radius: 4px; }
+.dbar .dbar-track { position: relative; height: 20px; background: var(--surface); border-radius: 4px; }
 .dbar .dbar-mid { position: absolute; left: 50%; top: 0; bottom: 0; width: 1px; background: #cbd5e1; }
 .dbar .dbar-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; }
 .breadth-bar { display: flex; height: 38px; border-radius: 9px; overflow: hidden; font-size: 0.82rem; font-weight: 700; color: #fff; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.03); }
@@ -1448,18 +1500,18 @@ tr:hover { background: #f8fafc; }
 .hist-x { font-size: 0.6rem; color: #94a3b8; margin-top: 4px; white-space: nowrap; }
 @media (max-width: 768px) { .heat-tile { width: 72px; height: 50px; } }
 /* ===== Collapsible reference sections (native <details>, no JS) ===== */
-details.section-details { background: white; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden; }
+details.section-details { background: var(--card-bg); border-radius: 10px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); overflow: hidden; }
 details.section-details > summary { list-style: none; cursor: pointer; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 details.section-details > summary::-webkit-details-marker { display: none; }
 details.section-details > summary h2 { margin: 0; border-bottom: none; padding-bottom: 0; }
-details.section-details > summary .toggle-hint { flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; color: #64748b; background: #f1f5f9; padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
+details.section-details > summary .toggle-hint { flex: 0 0 auto; font-size: 0.72rem; font-weight: 700; color: var(--text-muted); background: var(--surface); padding: 4px 10px; border-radius: 20px; white-space: nowrap; }
 details.section-details[open] > summary .toggle-hint::before { content: '▲ Hide'; }
 details.section-details:not([open]) > summary .toggle-hint::before { content: '▼ Show'; }
-details.section-details > summary:hover { background: #f8fafc; }
+details.section-details > summary:hover { background: var(--surface); }
 details.section-details > .details-body { padding: 0 20px 20px; }
 /* ===== Quick-jump anchor pills ===== */
 .jumpnav { display: flex; flex-wrap: wrap; gap: 8px; margin: -6px 0 20px; }
-.jumpnav a { font-size: 0.8rem; font-weight: 600; color: #334155; background: white; border: 1px solid #e2e8f0; border-radius: 20px; padding: 6px 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
+.jumpnav a { font-size: 0.8rem; font-weight: 600; color: var(--text); background: var(--card-bg); border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; text-decoration: none; box-shadow: 0 1px 2px rgba(0,0,0,0.04); }
 .jumpnav a:hover { border-color: #3b82f6; color: #1e40af; }
 .jumpnav .jumpnav-group { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; color: #94a3b8; align-self: center; margin-right: -2px; }
 /* ===== Combined Net Worth glance (stocks + bonds) ===== */
@@ -1571,15 +1623,42 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             "rows.sort(function(a,b){var x=scv(a.cells[idx],type),y=scv(b.cells[idx],type);"
             "if(x<y)return asc?-1:1;if(x>y)return asc?1:-1;return 0;});"
             "rows.forEach(function(r){tb.appendChild(r);});}")
-        js = f"<script>{filter_js}{tip_js}{sort_js}</script>"
+        # Dark/light toggle: resolve + apply the theme, click handler, and set
+        # the button's icon/label to match. theme_js runs after body paint
+        # (bundled with the other page scripts); the resolve step itself
+        # already ran earlier in <head> (see theme_head_js below) so there's
+        # no flash of the wrong theme — this just syncs the button's label.
+        theme_js = (
+            "function toggleTheme(){var h=document.documentElement;"
+            "var t=h.getAttribute('data-theme')==='dark'?'light':'dark';"
+            "h.setAttribute('data-theme',t);try{localStorage.setItem('nse-theme',t);}catch(e){}"
+            "var b=document.getElementById('themeBtn');if(b)b.textContent=t==='dark'?'☀️ Light':'🌙 Dark';}"
+            "(function(){var b=document.getElementById('themeBtn');if(b)b.textContent="
+            "document.documentElement.getAttribute('data-theme')==='dark'?'☀️ Light':'🌙 Dark';})();"
+        )
+        js = f"<script>{filter_js}{tip_js}{sort_js}{theme_js}</script>"
+        # Runs synchronously in <head>, before first paint, so the page never
+        # flashes the wrong theme: a saved choice wins, otherwise fall back
+        # to the OS/browser's prefers-color-scheme.
+        theme_head_js = (
+            "<script>(function(){try{"
+            "var t=localStorage.getItem('nse-theme')||"
+            "(window.matchMedia&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light');"
+            "document.documentElement.setAttribute('data-theme',t);"
+            "}catch(e){}})();</script>"
+        )
         return (
             '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">'
             '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
-            + self._FAVICON +
+            + theme_head_js +
+            self._FAVICON +
             f'<title>{page_title}</title>' + self._dashboard_css() + '</head><body>'
             '<div class="container">'
             '<div class="topbar">'
-            f'<div class="header"><h1>🇰🇪 NSE Dashboard</h1><div class="date">{subtitle}</div></div>'
+            '<div class="header"><h1>🇰🇪 NSE Dashboard</h1>'
+            f'<div class="header-actions"><button class="theme-toggle" id="themeBtn" '
+            'onclick="toggleTheme()" title="Toggle dark/light mode">🌙 Dark</button>'
+            f'<div class="date">{subtitle}</div></div></div>'
             f'<div class="nav">{nav}</div>'
             '</div>'
             f'{body_html}'
@@ -2162,8 +2241,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         # ---------- disclaimer ----------
         parts.append(
-            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
-            'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
+            '<div class="banner banner-warn">'
             '⚠️ <strong>Educational information, not financial advice.</strong> These are factual '
             'figures published by the Central Bank of Kenya, plus plain-English explanations to help '
             'you understand them. I am not a licensed investment adviser. Always confirm the exact '
@@ -3260,8 +3338,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         # ---------- disclaimer ----------
         parts.append(
             '<a id="stocks-top"></a>'
-            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
-            'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
+            '<div class="banner banner-warn">'
             '⚠️ <strong>Your private portfolio — educational information, not financial advice.</strong> '
             'Values are computed fresh every run from the same verified prices and fundamentals used '
             'throughout this dashboard. The "TV Signal" and "Score" per holding are the same transparent, '
@@ -3272,8 +3349,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         missing = portfolio_summary.get('missing_symbols') or []
         if missing:
             parts.append(
-                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
-                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                '<div class="banner banner-danger" style="padding:12px 18px;font-size:0.88rem;">'
                 f'⚠️ <strong>No live data today for: {", ".join(missing)}.</strong> '
                 'These holdings are excluded from the totals below rather than shown with a guessed '
                 'price. Try running the pipeline again — this is usually a temporary gap in the day\'s '
@@ -3643,8 +3719,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         # ---------- privacy / disclaimer ----------
         parts.append(
             '<a id="bonds-top"></a>'
-            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
-            'padding:14px 18px;margin:28px 0 18px;font-size:0.9rem;color:#78350f;">'
+            '<div class="banner banner-warn" style="margin-top:28px;">'
             '⚠️ <strong>Your private bond portfolio — educational information, not financial or tax '
             'advice.</strong> Coupon rates, dates and redemption rules are sourced from official CBK '
             'prospectuses (cited per bond below) — contractual facts, not estimates. Anything marked '
@@ -3656,8 +3731,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         missing = bond_portfolio.get('missing_issues') or []
         if missing:
             parts.append(
-                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
-                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                '<div class="banner banner-danger" style="padding:12px 18px;font-size:0.88rem;">'
                 f'⚠️ <strong>No verified reference data for: {", ".join(missing)}.</strong> '
                 'These are excluded from the totals below rather than shown with guessed terms. Add '
                 'them to <code>BOND_REFERENCE</code> in <code>src/bonds_portfolio.py</code>, citing the '
@@ -4013,8 +4087,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         parts.append(
             '<a id="intl-top"></a>'
-            '<div style="background:#fffbeb;border-left:6px solid #f59e0b;border-radius:8px;'
-            'padding:14px 18px;margin-bottom:18px;font-size:0.9rem;color:#78350f;">'
+            '<div class="banner banner-warn">'
             '⚠️ <strong>Your private international portfolio — educational information, not financial '
             'advice.</strong> Values are USD, fetched fresh every run from Yahoo Finance and run through '
             'the exact same technical-analysis and factor-scoring engine as your NSE holdings. "Rating" is '
@@ -4025,8 +4098,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         missing = intl_portfolio_summary.get('missing_symbols') or []
         if missing:
             parts.append(
-                '<div style="background:#fee2e2;border-left:6px solid #dc2626;border-radius:8px;'
-                'padding:12px 18px;margin-bottom:18px;font-size:0.88rem;color:#7f1d1d;">'
+                '<div class="banner banner-danger" style="padding:12px 18px;font-size:0.88rem;">'
                 f'⚠️ <strong>No live data today for: {", ".join(missing)}.</strong> '
                 'These holdings are excluded from the totals below rather than shown with a guessed '
                 'price. Try running the pipeline again.</div>')
