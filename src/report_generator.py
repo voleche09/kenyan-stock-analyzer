@@ -451,6 +451,103 @@ class ReportGenerator:
         html_content = self._render('stock_report.html', template_data)
         return self._save_report(f"{symbol}_report", html_content, report_type)
 
+    def generate_international_stock_report(self, symbol, analysis_result, report_type='html',
+                                             fundamentals=None, score=None, dividend_history=None,
+                                             earnings_calendar=None, news=None, usd_kes=None):
+        """
+        Per-stock report for an international (US-listed, USD) holding —
+        same shape as generate_stock_report(), reusing the exact same chart
+        builders, interpret_* explainers and fund_color thresholds (all
+        already currency-agnostic). USD-first; a KES-converted price is
+        shown alongside if a live FX rate was fetched this run.
+        """
+        if not analysis_result or 'data' not in analysis_result:
+            logger.error(f"Invalid analysis result for international stock {symbol}")
+            return None
+
+        from collections import defaultdict
+        fundamentals = defaultdict(lambda: None, fundamentals or {})
+
+        data = analysis_result['data']
+        signals = analysis_result.get('signals', {})
+        latest = analysis_result.get('latest', {})
+        supports = analysis_result.get('support', [])
+        resistances = analysis_result.get('resistance', [])
+        daily_change = analysis_result.get('daily_change_pct')
+        data_date = datetime.now().strftime('%Y-%m-%d')
+
+        charts = [
+            {'title': f'{symbol} — Price & Moving Averages', 'data': self._make_price_chart(data, f'{symbol} Price Chart')},
+            {'title': f'{symbol} — RSI', 'data': self._make_rsi_chart(data, f'{symbol} RSI')},
+            {'title': f'{symbol} — MACD', 'data': self._make_macd_chart(data, f'{symbol} MACD')},
+        ]
+        if 'volume' in data.columns:
+            charts.append({'title': f'{symbol} — Volume', 'data': self._make_volume_chart(data, f'{symbol} Volume')})
+        if 'stoch_k' in data.columns and 'stoch_d' in data.columns:
+            charts.append({'title': f'{symbol} — Stochastic', 'data': self._make_stochastic_chart(data, f'{symbol} Stochastic')})
+        if 'atr' in data.columns:
+            charts.append({'title': f'{symbol} — ATR (Volatility)', 'data': self._make_atr_chart(data, f'{symbol} ATR')})
+
+        recent = data.tail(10).copy()
+        recent_records = []
+        for idx, row in recent.iterrows():
+            recent_records.append({
+                'date': idx.strftime('%Y-%m-%d') if hasattr(idx, 'strftime') else str(idx),
+                'open': row.get('open'), 'high': row.get('high'),
+                'low': row.get('low'), 'close': row.get('close'),
+                'volume': int(row['volume']) if pd.notna(row.get('volume')) else None,
+            })
+
+        from international_portfolio import signal_from_recommendation
+        recommendation_text, rec_class_raw = signal_from_recommendation(fundamentals.get('recommendation_key'))
+        # Reuse stock_report.html's buy/hold/sell colour convention (rec_class in
+        # {'buy','hold','sell','none'}), mapped from our bullish/neutral/bearish/undefined.
+        rec_class = {'bullish': 'buy', 'bearish': 'sell', 'neutral': 'hold'}.get(rec_class_raw, 'none')
+
+        price = latest.get('close')
+        fx_rate = usd_kes.get('rate') if usd_kes else None
+        price_kes = (price * fx_rate) if (price is not None and fx_rate) else None
+
+        target_mean = fundamentals.get('target_mean_price')
+        target_upside_pct = ((target_mean - price) / price * 100.0) if (target_mean and price) else None
+
+        template_data = {
+            'symbol': symbol,
+            'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'data_date': data_date,
+            'latest': latest,
+            'signals': signals,
+            'charts': charts,
+            'supports': supports,
+            'resistances': resistances,
+            'daily_change': daily_change,
+            'recent_data': recent_records,
+            'fundamentals': fundamentals,
+            'recommendation_text': recommendation_text,
+            'rec_class': rec_class,
+            'score': score or {},
+            'dividend_history': dividend_history or [],
+            'earnings_calendar': earnings_calendar or {},
+            'news': news or [],
+            'usd_kes': usd_kes or {},
+            'price_kes': price_kes,
+            'target_upside_pct': target_upside_pct,
+            # Helper functions for the template — reused unchanged from the NSE
+            # report where currency-agnostic (interpret_*, fund_color); USD
+            # variants for the two that hardcode "KES".
+            'fmt_mcap': self._fmt_mcap_usd,
+            'fmt_currency': self._fmt_currency_usd,
+            'interpret_pe': self._interpret_pe,
+            'interpret_peg': self._interpret_peg,
+            'interpret_roe': self._interpret_roe,
+            'interpret_de': self._interpret_de,
+            'interpret_rsi': self._interpret_rsi,
+            'fund_color': self._fund_color,
+        }
+
+        html_content = self._render('international_stock_report.html', template_data)
+        return self._save_report(f"intl_{symbol}_report", html_content, report_type)
+
     # ---- Formatting helpers for templates ----
 
     @staticmethod
@@ -495,6 +592,40 @@ class ReportGenerator:
             elif abs(v) >= 1e6:
                 return f"KES {v / 1e6:.2f}M"
             return f"KES {v:,.0f}"
+        except (ValueError, TypeError):
+            return 'N/A'
+
+    @staticmethod
+    def _fmt_mcap_usd(value):
+        """Same as _fmt_mcap but for USD (international stocks)."""
+        if value is None or not value:
+            return 'N/A'
+        try:
+            v = float(value)
+            if v >= 1e12:
+                return f"${v / 1e12:.2f} Trillion"
+            elif v >= 1e9:
+                return f"${v / 1e9:.2f} Billion"
+            elif v >= 1e6:
+                return f"${v / 1e6:.2f} Million"
+            return f"${v:,.0f}"
+        except (ValueError, TypeError):
+            return 'N/A'
+
+    @staticmethod
+    def _fmt_currency_usd(value):
+        """Same as _fmt_currency but for USD (international stocks)."""
+        if value is None or not value:
+            return 'N/A'
+        try:
+            v = float(value)
+            if abs(v) >= 1e12:
+                return f"${v / 1e12:.2f}T"
+            elif abs(v) >= 1e9:
+                return f"${v / 1e9:.2f}B"
+            elif abs(v) >= 1e6:
+                return f"${v / 1e6:.2f}M"
+            return f"${v:,.0f}"
         except (ValueError, TypeError):
             return 'N/A'
 
@@ -987,7 +1118,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                        portfolio_summary=None, portfolio_history=None, portfolio_news=None,
                        portfolio_history_tracker=None, bond_portfolio=None,
                        intl_portfolio_summary=None, intl_portfolio_history=None,
-                       intl_portfolio_news=None, intl_portfolio_history_tracker=None):
+                       intl_portfolio_news=None, intl_portfolio_history_tracker=None,
+                       intl_report_files=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -1105,6 +1237,14 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             portfolio_summary['holdings'] = [
                 {**h, 'report_file': report_files.get(h['symbol'], '')}
                 for h in portfolio_summary['holdings']
+            ]
+
+        # Same linking for international holdings, to their intl_{symbol}_report.html pages.
+        if intl_portfolio_summary and intl_report_files:
+            intl_portfolio_summary = dict(intl_portfolio_summary)
+            intl_portfolio_summary['holdings'] = [
+                {**h, 'report_file': intl_report_files.get(h['symbol'], '')}
+                for h in intl_portfolio_summary['holdings']
             ]
 
         index_path = self._build_dashboard_pages(
