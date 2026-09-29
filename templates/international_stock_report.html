@@ -1,0 +1,427 @@
+{% extends "base.html" %}
+{% block title %}{{ symbol }} — International Stock Analysis{% endblock %}
+
+{% block content %}
+<!-- Header -->
+<div class="header">
+    <h1>{{ symbol }} {% if fundamentals.name and fundamentals.name != symbol %}— {{ fundamentals.name }}{% endif %}</h1>
+    <div class="meta">
+        Generated at {{ generated_at }} |
+        {% if fundamentals.sector %}{{ fundamentals.sector }}{% if fundamentals.industry %} · {{ fundamentals.industry }}{% endif %} | {% elif fundamentals.quote_type == 'ETF' %}ETF | {% endif %}
+        Market Cap: {{ fmt_mcap(fundamentals.market_cap) }} |
+        Price: ${{ "%.2f"|format(latest.close) if latest.close else 'N/A' }}
+        {% if price_kes %}(≈ KES {{ "%.2f"|format(price_kes) }}){% endif %}
+        {% if daily_change is not none %}
+        | Daily Change: <span class="{% if daily_change >= 0 %}positive{% else %}negative{% endif %}">
+            {{ "%+.2f"|format(daily_change) }}%
+        </span>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Navigation Bar -->
+<div class="nav-bar">
+    <a href="index.html" class="nav-item">🏠 Overview</a>
+    <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
+    <a href="technicals.html" class="nav-item">📈 Technicals</a>
+    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
+    <a href="dividends.html" class="nav-item">💵 Dividends</a>
+    <a href="earnings.html" class="nav-item">📅 Next Earnings</a>
+    <a href="sectors.html" class="nav-item">📊 Sectors</a>
+    <a href="foreign.html" class="nav-item">🌍 Foreign Flows</a>
+    <a href="pulse.html" class="nav-item">🧭 Market Pulse</a>
+    <a href="bonds.html" class="nav-item">🏦 Govt Bonds</a>
+    <a href="quality.html" class="nav-item">✅ Data Quality</a>
+    <span class="nav-date">📅 {{ data_date }} · Yahoo Finance</span>
+</div>
+
+<div style="background:#eff6ff;border-left:6px solid #3b82f6;border-radius:8px;padding:10px 18px;margin-bottom:16px;font-size:0.85rem;color:#1e3a8a;">
+    🌍 This is one of your private <strong>international (US-listed)</strong> holdings — priced in USD, sourced from Yahoo Finance,
+    analyzed with the exact same technical-analysis engine used for your NSE stocks. Never committed to git.
+</div>
+
+<!-- ============================================================ -->
+<!-- SCORE, DIVIDEND & RANGE -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>🎯 Score, Dividend &amp; Range</h2>
+    <div class="metrics-grid">
+        <div class="metric">
+            <div class="label">Factor score (0-100)</div>
+            <div class="value">{{ score.overall if score.overall is not none else 'N/A' }}</div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;">
+                {% if score.overall is not none %}
+                Value {{ score.value if score.value is not none else '—' }} ·
+                Quality {{ score.quality if score.quality is not none else '—' }} ·
+                Momentum {{ score.momentum if score.momentum is not none else '—' }} ·
+                Dividend {{ score.dividend if score.dividend is not none else '—' }} ·
+                Liquidity {{ score.liquidity if score.liquidity is not none else '—' }}.
+                {% endif %}
+                A transparent mechanical screen of public metrics — not investment advice. The same engine used dashboard-wide.
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Dividend</div>
+            <div class="value" style="font-size:1rem;">
+                {% if fundamentals.dividend_rate and fundamentals.dividend_rate > 0 %}
+                <span style="background:#ccfbf1;color:#0f766e;font-weight:700;padding:2px 10px;border-radius:10px;">${{ "%.2f"|format(fundamentals.dividend_rate) }}/share/yr</span>
+                {% else %}
+                <span style="background:#f1f5f9;color:#94a3b8;font-weight:600;padding:2px 10px;border-radius:10px;">0 — no dividend</span>
+                {% endif %}
+                <br>
+                {% if fundamentals.ex_dividend_date %}<span style="font-size:0.85rem;">Last ex-div: {{ fundamentals.ex_dividend_date }}</span><br>{% endif %}
+                {% if earnings_calendar.get('Earnings Date') %}<span style="font-size:0.85rem; color:var(--text-muted);">Next earnings: {{ earnings_calendar['Earnings Date']|join(' or ') }}</span>{% endif %}
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;">"Ex-div" is the most recent date the dividend was declared for; a new one is announced closer to the next payment.</div>
+        </div>
+        <div class="metric">
+            <div class="label">52-Week Range</div>
+            <div class="value" style="font-size:1rem;">
+                {% if fundamentals.week52_low and fundamentals.week52_high %}${{ "%.2f"|format(fundamentals.week52_low) }} – ${{ "%.2f"|format(fundamentals.week52_high) }}{% else %}N/A{% endif %}
+            </div>
+            {% if fundamentals.week52_low and fundamentals.week52_high and latest.close %}
+            {% set rng = fundamentals.week52_high - fundamentals.week52_low %}
+            {% set pos = ((latest.close - fundamentals.week52_low) / rng * 100) if rng > 0 else 50 %}
+            <div style="background:#e2e8f0;border-radius:4px;height:8px;margin-top:8px;position:relative;">
+                <div style="position:absolute;left:{{ [[pos, 0]|max, 100]|min }}%;top:-3px;width:3px;height:14px;background:#1e293b;border-radius:2px;"></div>
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px;">Today's price sits {{ "%.0f"|format(pos) }}% of the way from the 52-week low to high.</div>
+            {% endif %}
+        </div>
+        <div class="metric">
+            <div class="label">Avg. Daily Volume</div>
+            <div class="value" style="font-size:1rem;">
+                {% if fundamentals.average_volume %}{{ "{:,.0f}".format(fundamentals.average_volume) }} shares{% else %}N/A{% endif %}
+            </div>
+            <div style="font-size:0.72rem; color:var(--text-muted); margin-top:6px; line-height:1.4;">Higher volume means it's easier to buy/sell without moving the price.</div>
+        </div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- EXECUTIVE SUMMARY -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>📊 Executive Summary</h2>
+
+    {% set _reccolors = {'buy': ['#dcfce7','#166534','#16a34a'], 'hold': ['#fef3c7','#92400e','#d97706'], 'sell': ['#fee2e2','#991b1b','#dc2626'], 'none': ['#f1f5f9','#64748b','#94a3b8']} %}
+    {% set _rc = _reccolors.get(rec_class, _reccolors['none']) %}
+    <div style="background:{{ _rc[0] }}; border-left:6px solid {{ _rc[2] }}; border-radius:8px; padding:14px 18px; margin-bottom:16px;">
+        <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.05em; color:{{ _rc[1] }}; opacity:0.85;">Wall Street Analyst Consensus</div>
+        <div style="font-size:1.6rem; font-weight:800; color:{{ _rc[1] }}; margin-top:2px;">{{ recommendation_text }}</div>
+        <div style="font-size:0.8rem; color:{{ _rc[1] }}; margin-top:4px;">
+            {% if fundamentals.num_analysts %}Based on {{ fundamentals.num_analysts }} analyst{{ 's' if fundamentals.num_analysts != 1 else '' }}.{% else %}No analyst coverage available.{% endif %}
+            Real, sourced third-party opinion — <strong>not personalized advice</strong>.
+        </div>
+    </div>
+
+    {% if fundamentals.target_mean_price %}
+    <div class="metrics-grid" style="margin-bottom:16px;">
+        <div class="metric">
+            <div class="label">Analyst Target (Low – Mean – High)</div>
+            <div class="value" style="font-size:1rem;">
+                ${{ "%.2f"|format(fundamentals.target_low_price) if fundamentals.target_low_price else '—' }} –
+                <strong>${{ "%.2f"|format(fundamentals.target_mean_price) }}</strong> –
+                ${{ "%.2f"|format(fundamentals.target_high_price) if fundamentals.target_high_price else '—' }}
+            </div>
+        </div>
+        <div class="metric">
+            <div class="label">Upside/Downside to Mean Target</div>
+            <div class="value {{ 'positive' if target_upside_pct and target_upside_pct >= 0 else 'negative' }}">
+                {{ "%+.1f"|format(target_upside_pct) ~ '%' if target_upside_pct is not none else 'N/A' }}
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    {% set overall = signals.get('overall', 'neutral') %}
+    <div class="executive-verdict verdict-{{ overall }}">
+        <strong>Overall Technical Signal:</strong> {{ overall|title }} — computed the same way as every NSE stock on this dashboard (trend, MACD, RSI, Bollinger Bands, volume), from real price/volume history, not sentiment.
+    </div>
+
+    {% if fundamentals.summary %}
+    <p class="section-desc" style="margin-top:12px;">{{ fundamentals.summary[:400] }}{% if fundamentals.summary|length > 400 %}…{% endif %}</p>
+    {% endif %}
+</div>
+
+<!-- ============================================================ -->
+<!-- FUNDAMENTAL METRICS -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>💰 Fundamental Analysis <span class="data-date">Data from Yahoo Finance as of {{ data_date }}</span></h2>
+
+    <h3 class="section-subtitle">Valuation</h3>
+    <div class="metrics-grid">
+        <div class="metric"><div class="label">Market Cap</div><div class="value">{{ fmt_mcap(fundamentals.market_cap) }}</div></div>
+        <div class="metric"><div class="label">P/E Ratio (TTM)</div><div class="value {{ fund_color('pe', fundamentals.pe_ratio) }}">{{ "%.2f"|format(fundamentals.pe_ratio) if fundamentals.pe_ratio else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Forward P/E</div><div class="value">{{ "%.2f"|format(fundamentals.forward_pe) if fundamentals.forward_pe else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">PEG Ratio</div><div class="value {{ fund_color('peg', fundamentals.peg_ratio) }}">{{ "%.2f"|format(fundamentals.peg_ratio) if fundamentals.peg_ratio else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Price/Book</div><div class="value {{ fund_color('pb', fundamentals.price_to_book) }}">{{ "%.2f"|format(fundamentals.price_to_book) if fundamentals.price_to_book else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Price/Sales</div><div class="value {{ fund_color('ps', fundamentals.price_to_sales) }}">{{ "%.2f"|format(fundamentals.price_to_sales) if fundamentals.price_to_sales else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Enterprise Value</div><div class="value">{{ fmt_currency(fundamentals.enterprise_value) }}</div></div>
+        <div class="metric"><div class="label">EV/EBITDA</div><div class="value {{ fund_color('ev_ebitda', fundamentals.ev_to_ebitda) }}">{{ "%.2f"|format(fundamentals.ev_to_ebitda) if fundamentals.ev_to_ebitda else 'N/A' }}</div></div>
+    </div>
+
+    <h3 class="section-subtitle">Growth</h3>
+    <div class="metrics-grid">
+        <div class="metric"><div class="label">Revenue Growth (YoY)</div><div class="value {{ fund_color('rg', fundamentals.revenue_growth_yoy) }}">{{ "%.2f"|format(fundamentals.revenue_growth_yoy) ~ '%' if fundamentals.revenue_growth_yoy is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Earnings Growth (YoY)</div><div class="value {{ fund_color('eps_growth', fundamentals.earnings_growth_yoy) }}">{{ "%.2f"|format(fundamentals.earnings_growth_yoy) ~ '%' if fundamentals.earnings_growth_yoy is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">EPS (TTM)</div><div class="value {{ fund_color('eps', fundamentals.eps_ttm) }}">${{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Forward EPS</div><div class="value">${{ "%.2f"|format(fundamentals.forward_eps) if fundamentals.forward_eps else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Revenue (TTM)</div><div class="value">{{ fmt_currency(fundamentals.revenue_ttm) }}</div></div>
+        <div class="metric"><div class="label">Net Income (TTM)</div><div class="value">{{ fmt_currency(fundamentals.net_income_ttm) }}</div></div>
+        <div class="metric"><div class="label">Free Cash Flow (TTM)</div><div class="value">{{ fmt_currency(fundamentals.free_cash_flow_ttm) }}</div></div>
+    </div>
+
+    <h3 class="section-subtitle">Profitability</h3>
+    <div class="metrics-grid">
+        <div class="metric"><div class="label">ROE</div><div class="value {{ fund_color('roe', fundamentals.roe) }}">{{ "%.2f"|format(fundamentals.roe) ~ '%' if fundamentals.roe is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Gross Margin</div><div class="value {{ fund_color('gm', fundamentals.gross_margin) }}">{{ "%.2f"|format(fundamentals.gross_margin) ~ '%' if fundamentals.gross_margin is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Operating Margin</div><div class="value {{ fund_color('om', fundamentals.operating_margin) }}">{{ "%.2f"|format(fundamentals.operating_margin) ~ '%' if fundamentals.operating_margin is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Net Margin</div><div class="value {{ fund_color('nm', fundamentals.net_margin) }}">{{ "%.2f"|format(fundamentals.net_margin) ~ '%' if fundamentals.net_margin is not none else 'N/A' }}</div></div>
+    </div>
+
+    <h3 class="section-subtitle">Financial Health</h3>
+    <div class="metrics-grid">
+        <div class="metric"><div class="label">Debt/Equity</div><div class="value {{ fund_color('de', fundamentals.debt_to_equity) }}">{{ "%.2f"|format(fundamentals.debt_to_equity) if fundamentals.debt_to_equity is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Current Ratio</div><div class="value {{ fund_color('cr', fundamentals.current_ratio) }}">{{ "%.2f"|format(fundamentals.current_ratio) if fundamentals.current_ratio else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Quick Ratio</div><div class="value {{ fund_color('qr', fundamentals.quick_ratio) }}">{{ "%.2f"|format(fundamentals.quick_ratio) if fundamentals.quick_ratio else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Total Debt</div><div class="value">{{ fmt_currency(fundamentals.total_debt) }}</div></div>
+        <div class="metric"><div class="label">Total Cash</div><div class="value">{{ fmt_currency(fundamentals.total_cash) }}</div></div>
+        <div class="metric"><div class="label">Dividend Yield</div><div class="value {{ fund_color('yield', fundamentals.dividend_yield) }}">{{ "%.2f"|format(fundamentals.dividend_yield) ~ '%' if fundamentals.dividend_yield is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Beta</div><div class="value">{{ "%.2f"|format(fundamentals.beta) if fundamentals.beta else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Shares Outstanding</div><div class="value">{{ "{:,.0f}".format(fundamentals.shares_outstanding) if fundamentals.shares_outstanding else 'N/A' }}</div></div>
+    </div>
+
+    {% if fundamentals.held_pct_insiders is not none or fundamentals.held_pct_institutions is not none %}
+    <h3 class="section-subtitle">Ownership</h3>
+    <div class="metrics-grid">
+        <div class="metric"><div class="label">Held by Insiders</div><div class="value">{{ "%.1f"|format(fundamentals.held_pct_insiders) ~ '%' if fundamentals.held_pct_insiders is not none else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Held by Institutions</div><div class="value">{{ "%.1f"|format(fundamentals.held_pct_institutions) ~ '%' if fundamentals.held_pct_institutions is not none else 'N/A' }}</div></div>
+    </div>
+    {% endif %}
+</div>
+
+<!-- ============================================================ -->
+<!-- TECHNICAL INDICATORS -->
+<!-- ============================================================ -->
+<div class="card">
+    <h2>📈 Technical Indicators</h2>
+    <div class="signals-grid">
+        {% for name in ['trend', 'ma_crossover', 'macd', 'rsi', 'bollinger', 'stochastic', 'volume'] %}
+        {% if name in signals %}
+        <span class="signal {{ signals[name] }}">{{ name|replace('_', ' ')|title }}: {{ signals[name]|replace('_', ' ')|title }}</span>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<div class="card">
+    <h2>📐 Technical Values</h2>
+    <div class="metrics-grid">
+        {% for key, label in [
+            ('close', 'Close Price'), ('sma_20', 'SMA 20'), ('sma_50', 'SMA 50'),
+            ('ema_12', 'EMA 12'), ('ema_26', 'EMA 26'), ('rsi', 'RSI (14)'),
+            ('atr', 'ATR (14)'), ('macd', 'MACD'), ('macd_signal', 'MACD Signal'),
+            ('macd_hist', 'MACD Histogram'), ('stoch_k', 'Stochastic %K'),
+            ('stoch_d', 'Stochastic %D'), ('volume', 'Volume')
+        ] %}
+        {% if latest.get(key) is not none %}
+        <div class="metric"><div class="label">{{ label }}</div><div class="value">{{ "%.2f"|format(latest[key]) }}</div></div>
+        {% endif %}
+        {% endfor %}
+    </div>
+</div>
+
+<!-- Charts -->
+{% for chart in charts %}
+<div class="card">
+    <h2>{{ chart.title }}</h2>
+    <div class="chart-container"><img src="data:image/png;base64,{{ chart.data }}" alt="{{ chart.title }}"></div>
+</div>
+{% endfor %}
+
+<!-- Support / Resistance -->
+{% if supports or resistances %}
+<div class="card">
+    <h2>Support &amp; Resistance Levels</h2>
+    <div class="levels-row">
+        {% if supports %}
+        <div class="level-box"><h3>🟢 Support Levels (floor)</h3>
+            {% for level in supports[:5] %}<span class="level-badge support">${{ "%.2f"|format(level) }}</span>{% endfor %}
+        </div>
+        {% endif %}
+        {% if resistances %}
+        <div class="level-box"><h3>🔴 Resistance Levels (ceiling)</h3>
+            {% for level in resistances[:5] %}<span class="level-badge resistance">${{ "%.2f"|format(level) }}</span>{% endfor %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endif %}
+
+<!-- Dividend History -->
+{% if dividend_history %}
+<div class="card">
+    <h2>💵 Dividend History</h2>
+    <p class="section-desc">Real payments Yahoo Finance has on record for {{ symbol }} — not a projection.</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Date</th><th>Amount per Share</th></tr></thead>
+            <tbody>
+                {% for d in dividend_history|reverse %}
+                <tr><td>{{ d.date }}</td><td>${{ "%.4f"|format(d.amount) }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endif %}
+
+<!-- News -->
+<div class="card">
+    <h2>📰 Recent News</h2>
+    {% if news %}
+    <p class="section-desc">Headlines mentioning {{ symbol }}, newest first. <strong>Shown neutral, on purpose</strong> — read the headline and judge for yourself; this dashboard doesn't fabricate sentiment scores.</p>
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Date</th><th>Headline</th><th>Source</th></tr></thead>
+            <tbody>
+                {% for n in news[:15] %}
+                <tr>
+                    <td style="white-space:nowrap;font-size:0.8rem;color:var(--text-muted);">{{ n.published_utc[:16] if n.published_utc else '—' }}</td>
+                    <td><a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a></td>
+                    <td style="font-size:0.8rem;color:var(--text-muted);">{{ n.source }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No recent headlines found for {{ symbol }}.</p>
+    {% endif %}
+</div>
+
+<!-- Recent Data -->
+<div class="card">
+    <h2>Recent Trading Data (Last 10 Days)</h2>
+    {% if recent_data %}
+    <div class="table-wrap">
+        <table>
+            <thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th><th>Volume</th></tr></thead>
+            <tbody>
+                {% for row in recent_data %}
+                <tr>
+                    <td>{{ row.get('date', 'N/A') }}</td>
+                    <td>${{ "%.2f"|format(row.open) if row.open is not none else 'N/A' }}</td>
+                    <td>${{ "%.2f"|format(row.high) if row.high is not none else 'N/A' }}</td>
+                    <td>${{ "%.2f"|format(row.low) if row.low is not none else 'N/A' }}</td>
+                    <td>${{ "%.2f"|format(row.close) if row.close is not none else 'N/A' }}</td>
+                    <td>{{ row.volume or 'N/A' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p>No recent data available.</p>
+    {% endif %}
+</div>
+
+<!-- Chart & Indicator Glossary (layman, ELI10) -->
+<div class="card">
+    <h2>📚 Chart &amp; Indicator Glossary — explained like you're 10</h2>
+    <p class="section-desc">Every term used on this page, in plain words with a simple example.</p>
+    <div class="table-wrap">
+        <table class="glossary">
+            <thead><tr><th>Term</th><th>What it means (simple)</th><th>Example</th></tr></thead>
+            <tbody>
+                <tr><td><strong>Analyst Price Target</strong></td>
+                    <td>What professional Wall Street analysts think the stock will be worth in about a year, on average ("mean"). It's a real, published opinion — not a guarantee.</td>
+                    <td>Target $420 vs today's $338 → analysts see about 24% upside, on average.</td></tr>
+                <tr><td><strong>Recommendation Consensus</strong></td>
+                    <td>The blended Buy/Hold/Sell opinion across all analysts covering the stock — the closest thing to "market sentiment" this page offers, and it's real and sourced, not invented.</td>
+                    <td>"Strong Buy" from 15 analysts means most of them rate it a buy.</td></tr>
+                <tr><td><strong>RSI</strong><br>(Relative Strength Index)</td>
+                    <td>A 0–100 speed meter of how fast the price has been rising or falling. Above 70 = bought too fast (may rest/drop); below 30 = sold too fast (may bounce).</td>
+                    <td>Like a swing pushed very high (70+) — it usually swings back down soon.</td></tr>
+                <tr><td><strong>MACD</strong><br>(Moving Avg Convergence Divergence)</td>
+                    <td>Compares a fast and a slow average of the price. Crossing <em>above</em> its signal line is a bullish hint; crossing <em>below</em> is bearish.</td>
+                    <td>Two runners: when the fast runner overtakes the slow one, momentum is turning up.</td></tr>
+                <tr><td><strong>Bollinger Bands</strong></td>
+                    <td>A price "envelope" — an average line with an upper and lower band. Price near the upper band = relatively expensive; near the lower = relatively cheap.</td>
+                    <td>Guard-rails on a road: touching the top rail means the price has run high for now.</td></tr>
+                <tr><td><strong>SMA / EMA</strong><br>(Simple / Exponential Moving Average)</td>
+                    <td>The average price over the last N days, drawn as a smooth line to reveal the trend. EMA reacts a bit faster (weights recent days more).</td>
+                    <td>Price above its SMA 50 line = generally trending up.</td></tr>
+                <tr><td><strong>Volume</strong></td>
+                    <td>How many shares were traded that day. <span class="positive">Green bar</span> = price rose that day, <span class="negative">red bar</span> = price fell.</td>
+                    <td>A tall green bar on a price jump = lots of buyers piling in.</td></tr>
+                <tr><td><strong>ATR</strong><br>(Average True Range)</td>
+                    <td>A "bounciness" meter — how much the price typically moves in a day. Higher ATR = wilder swings.</td>
+                    <td>ATR of $2 means the price usually moves about $2 a day.</td></tr>
+                <tr><td><strong>Support &amp; Resistance</strong></td>
+                    <td>Support = a price "floor" where buyers tend to step in. Resistance = a "ceiling" where sellers step in.</td>
+                    <td>If a stock keeps bouncing off $50, that $50 is support (the floor).</td></tr>
+                <tr><td><strong>Beta</strong></td>
+                    <td>How much a stock tends to move compared to the overall market. Beta of 1 = moves with the market; above 1 = swings more; below 1 = swings less.</td>
+                    <td>Beta 1.5 → if the market moves 10%, this stock tends to move about 15%.</td></tr>
+                <tr><td><strong>TTM / YoY</strong></td>
+                    <td>TTM = "trailing twelve months" (the last year of results). YoY = "year over year" (vs the same time last year).</td>
+                    <td>"Revenue growth YoY +24%" = sales are 24% higher than a year ago.</td></tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Bottom Navigation -->
+<div class="nav-bar bottom-nav">
+    <a href="index.html" class="nav-item">🏠 Overview</a>
+    <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
+    <a href="technicals.html" class="nav-item">📈 Technicals</a>
+    <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
+    <a href="dividends.html" class="nav-item">💵 Dividends</a>
+    <a href="earnings.html" class="nav-item">📅 Next Earnings</a>
+    <a href="sectors.html" class="nav-item">📊 Sectors</a>
+    <a href="foreign.html" class="nav-item">🌍 Foreign Flows</a>
+    <a href="pulse.html" class="nav-item">🧭 Market Pulse</a>
+    <a href="bonds.html" class="nav-item">🏦 Govt Bonds</a>
+    <a href="quality.html" class="nav-item">✅ Data Quality</a>
+</div>
+
+{% endblock %}
+
+{% block extra_css %}
+    {# NOTE: base.html already wraps this block inside its own <style>…</style>.
+       Do NOT add another <style> tag here — see jinja-nested-style-gotcha. #}
+    .section-desc { color: var(--text-muted); font-size: 0.88rem; margin-bottom: 12px; line-height: 1.5; }
+    .section-subtitle { font-size: 1rem; color: var(--text-muted); margin: 18px 0 10px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .section-subtitle:first-of-type { border-top: none; padding-top: 0; }
+    .data-date { float: right; font-size: 0.75rem; font-weight: 400; color: var(--text-muted); }
+    .executive-verdict { padding: 12px 16px; border-radius: 8px; font-size: 0.9rem; background: #f8fafc; border-left: 4px solid var(--accent); }
+    .executive-verdict.verdict-bullish { border-left-color: var(--bullish); }
+    .executive-verdict.verdict-bearish { border-left-color: var(--bearish); }
+    .glossary td { vertical-align: top; font-size: 0.85rem; }
+    .glossary td:nth-child(3) { color: var(--text-muted); }
+    /* Navigation — same styling as stock_report.html, for visual consistency
+       across NSE and international per-stock pages. */
+    .nav-bar {
+        display: flex; align-items: center; gap: 8px; padding: 10px 14px;
+        background: var(--card-bg); border-radius: 8px; margin-bottom: 16px;
+        border: 1px solid var(--border); flex-wrap: nowrap; overflow-x: auto;
+        scrollbar-width: thin; -webkit-overflow-scrolling: touch;
+    }
+    .nav-bar::-webkit-scrollbar { height: 6px; }
+    .nav-bar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+    .nav-bar:not(.bottom-nav) { position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 10px rgba(15,23,42,0.06); }
+    .nav-item {
+        padding: 7px 12px; border-radius: 8px; background: #f1f5f9; color: #334155;
+        text-decoration: none; font-weight: 600; font-size: 0.82rem;
+        border: 1px solid #e2e8f0; white-space: nowrap; flex: 0 0 auto;
+    }
+    .nav-item:hover { border-color: #3b82f6; color: #1e293b; }
+    .nav-date { color: var(--text-muted); font-size: 0.82rem; margin-left: auto; white-space: nowrap; flex: 0 0 auto; }
+    .bottom-nav { margin-top: 20px; margin-bottom: 0; }
+{% endblock %}
