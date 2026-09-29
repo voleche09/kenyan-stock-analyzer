@@ -145,6 +145,20 @@
             border: 1px solid var(--border);
         }
 
+        /* Company logo favicon next to a ticker — see report_generator.py's
+           _dashboard_css() for the matching rule and company_logos.py for
+           the source/fallback rationale. */
+        .ticker-logo {
+            width: 22px; height: 22px; border-radius: 50%; object-fit: cover;
+            vertical-align: middle; margin-right: 8px; background: #fff;
+            border: 1px solid var(--border);
+        }
+        .ticker-logo-fallback {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 22px; height: 22px; border-radius: 50%; vertical-align: middle;
+            margin-right: 8px; color: #fff; font-size: 0.7rem; font-weight: 800; line-height: 1;
+        }
+
         /* Tables */
         table {
             width: 100%;

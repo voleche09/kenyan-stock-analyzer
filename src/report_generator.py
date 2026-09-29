@@ -87,7 +87,7 @@ COLORS = {
 class ReportGenerator:
     """Generates HTML/PDF reports and Excel exports."""
 
-    def __init__(self, template_dir=None, output_dir=None, clean_old=True):
+    def __init__(self, template_dir=None, output_dir=None, clean_old=True, cache_dir='data'):
         if template_dir is None:
             template_dir = os.path.join(
                 os.path.dirname(__file__), '..', 'templates'
@@ -111,6 +111,11 @@ class ReportGenerator:
 
         self.env = Environment(loader=FileSystemLoader(self.template_dir))
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.cache_dir = cache_dir
+        # Memoizes _ticker_logo_html() per symbol for this run — a symbol
+        # appearing in several tables (main dashboard, portfolio, dividends)
+        # is only resolved/fetched once.
+        self._logo_html_cache = {}
 
         logger.info(
             f"ReportGenerator: templates={self.template_dir}, "
@@ -416,6 +421,7 @@ class ReportGenerator:
         # Render template
         template_data = {
             'symbol': symbol,
+            'ticker_logo_html': self._ticker_logo_html(symbol),
             'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'data_date': data_date,
             'latest': latest,
@@ -513,6 +519,7 @@ class ReportGenerator:
 
         template_data = {
             'symbol': symbol,
+            'ticker_logo_html': self._ticker_logo_html(symbol, website=fundamentals.get('website')),
             'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'data_date': data_date,
             'latest': latest,
@@ -560,6 +567,31 @@ class ReportGenerator:
             return valuation_vs_sector(fundamentals, sector_medians)
         except Exception:
             return {}
+
+    def _ticker_logo_html(self, symbol, website=None):
+        """
+        Circular company-logo <img> for a ticker, or a colored-initial
+        fallback badge if no logo is available — see company_logos.py for
+        the source, caching and privacy rationale. Memoized per symbol for
+        this run (self._logo_html_cache) since the same symbol is rendered
+        in several tables.
+        """
+        cache_key = f"{symbol}|{website or ''}"
+        cached = self._logo_html_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        import company_logos as _logos
+        domain = _logos.resolve_domain(symbol, website=website)
+        b64 = _logos.fetch_logo_base64(domain, cache_dir=self.cache_dir) if domain else None
+        if b64:
+            html = (f'<img class="ticker-logo" src="data:image/png;base64,{b64}" '
+                    f'alt="{symbol} logo" loading="lazy">')
+        else:
+            html = _logos.fallback_badge_html(symbol)
+
+        self._logo_html_cache[cache_key] = html
+        return html
 
     @staticmethod
     def _fmt_mcap(value):
@@ -1371,6 +1403,12 @@ th.sortable.sort-desc::after { content: '▼'; opacity: 0.85; color: #3b82f6; }
 tr:hover { background: var(--surface); }
 .stock-link { color: #3b82f6; text-decoration: none; font-weight: 600; }
 .stock-link:hover { text-decoration: underline; }
+/* Company logo favicons next to a ticker — circular, small, theme-invariant
+   (white backing so logos with transparent PNGs still show cleanly on a
+   dark page, same reasoning as .chart-img). Fallback badge (no image) uses
+   a deterministic per-symbol color — see company_logos.py. */
+.ticker-logo { width: 18px; height: 18px; border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 6px; background: #fff; border: 1px solid var(--border); }
+.ticker-logo-fallback { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; vertical-align: middle; margin-right: 6px; color: #fff; font-size: 0.6rem; font-weight: 800; line-height: 1; }
 /* Badges */
 .badge { padding: 2px 8px; border-radius: 10px; font-size: 0.7rem; font-weight: 600; text-transform: capitalize; }
 .bullish, .golden_cross, .bullish_cross, .oversold, .buy { background: #dcfce7; color: #166534; }
@@ -3464,7 +3502,9 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             if not h['data_available']:
                 rows += (
                     f'<tr data-tip="{tip}" style="opacity:0.55;">'
-                    f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                    f'<td><a href="{link}" class="stock-link">'
+                    f'{self._ticker_logo_html(h["symbol"], website=h.get("website"))}'
+                    f'<strong>{h["symbol"]}</strong></a></td>'
                     f'<td>{h["quantity"]:,.0f}</td><td>{h["avg_cost"]:.2f}</td>'
                     '<td colspan="9" style="color:#dc2626;">No live data today — see warning above</td></tr>')
                 continue
@@ -3481,7 +3521,8 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             dy_txt = f'{dy:.1f}%' if dy is not None else '—'
             rows += (
                 f'<tr data-tip="{tip}">'
-                f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                f'<td><a href="{link}" class="stock-link">{self._ticker_logo_html(h["symbol"])}'
+                f'<strong>{h["symbol"]}</strong></a></td>'
                 f'<td>{h["quantity"]:,.0f}</td>'
                 f'<td>{h["avg_cost"]:.2f}</td>'
                 f'<td>{h["price"]:.2f}</td>'
@@ -3529,7 +3570,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             dps_txt = f"KES {h['dps_fy']:.2f}/share" if h.get('dps_fy') else '—'
             dy_txt = f"{h['dividend_yield']:.1f}%" if h.get('dividend_yield') is not None else '—'
             div_rows += (
-                f'<tr><td><strong>{h["symbol"]}</strong></td>'
+                f'<tr><td>{self._ticker_logo_html(h["symbol"], website=h.get("website"))}<strong>{h["symbol"]}</strong></td>'
                 f'<td>{badge}</td>'
                 f'<td>{dps_txt}</td>'
                 f'<td>{dy_txt}</td>'
@@ -4197,7 +4238,9 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             if not h['data_available']:
                 rows += (
                     f'<tr data-tip="{tip}" style="opacity:0.55;">'
-                    f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a></td>'
+                    f'<td><a href="{link}" class="stock-link">'
+                    f'{self._ticker_logo_html(h["symbol"], website=h.get("website"))}'
+                    f'<strong>{h["symbol"]}</strong></a></td>'
                     f'<td>{h["quantity"]:,.0f}</td><td>{h["avg_cost"]:.2f}</td>'
                     '<td colspan="8" style="color:#dc2626;">No live data today — see warning above</td></tr>')
                 continue
@@ -4209,7 +4252,8 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             sc_html = f'<span class="score {sc_cls} hint">{sc}</span>' if sc is not None else '—'
             rows += (
                 f'<tr data-tip="{tip}">'
-                f'<td><a href="{link}" class="stock-link"><strong>{h["symbol"]}</strong></a> '
+                f'<td><a href="{link}" class="stock-link">{self._ticker_logo_html(h["symbol"], website=h.get("website"))}'
+                f'<strong>{h["symbol"]}</strong></a> '
                 f'<span style="color:#94a3b8;font-size:0.75rem;">{h["name"]}</span></td>'
                 f'<td>{h["quantity"]:,.0f}</td>'
                 f'<td>{h["avg_cost"]:.2f}</td>'
@@ -4242,7 +4286,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 continue
             dy_txt = f"{h['dividend_yield']:.2f}%" if h.get('dividend_yield') is not None else '—'
             div_rows += (
-                f'<tr><td><strong>{h["symbol"]}</strong></td>'
+                f'<tr><td>{self._ticker_logo_html(h["symbol"], website=h.get("website"))}<strong>{h["symbol"]}</strong></td>'
                 f'<td>${h["dividend_rate"]:.2f}/share/yr</td>'
                 f'<td>{dy_txt}</td>'
                 f'<td>${(h.get("est_annual_dividend") or 0):,.0f}/yr</td></tr>')
@@ -4353,7 +4397,8 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             link = s['report_file'] if s['report_file'] else '#'
             # data-tip → hover any symbol for a quick preview (price, signal, score)
             return (f'<td data-tip="{self._stock_tip(s)}">'
-                    f'<a href="{link}" class="stock-link"><strong>{s["symbol"]}</strong></a></td>')
+                    f'<a href="{link}" class="stock-link">{self._ticker_logo_html(s["symbol"])}'
+                    f'<strong>{s["symbol"]}</strong></a></td>')
 
         # ---- Market pulse stats (shared on Overview) ----
         breadth_html = ''
@@ -4510,7 +4555,8 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             for r in rows:
                 dps = f"{round(r['dps'],2):g}" if r['dps'] else '0'
                 yld = f"{r['yield']:.1f}%" if r['yield'] else '—'
-                body += (f'<tr><td><strong>{r["symbol"]}</strong></td><td>{dps}</td><td>{yld}</td>'
+                body += (f'<tr><td>{self._ticker_logo_html(r["symbol"])}<strong>{r["symbol"]}</strong></td>'
+                         f'<td>{dps}</td><td>{yld}</td>'
                          f'<td><span class="cal-chip {r["cls"]}">{r["ex"]}</span></td><td>{r["when"]}</td></tr>')
             return ('<table><thead><tr><th>Symbol</th><th>Div KES</th><th>Yield</th>'
                     f'<th>Ex-Date</th><th>When</th></tr></thead><tbody>{body}</tbody></table>')
