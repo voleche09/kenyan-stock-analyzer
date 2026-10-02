@@ -2,7 +2,7 @@
 Data acquisition for international (US-listed, USD) stocks — via Yahoo Finance
 (yfinance), already a dependency in this project (used as an NSE fallback
 source in data_acquisition.py). Unlike NSE stocks, US tickers have no
-suffix/exchange quirks for yfinance — a bare symbol (GOOG, INTC, UBER, ...)
+suffix/exchange quirks for yfinance — a bare symbol (AAPL, MSFT, ...)
 is all that's needed.
 
 Mirrors data_acquisition.py + fundamental_analysis.py's role for NSE stocks:
@@ -14,14 +14,14 @@ None/[]/{} rather than raising, so one bad ticker or a network hiccup never
 crashes the pipeline — same contract as the rest of this codebase.
 
 Percentage-scale conversions below were verified against LIVE yfinance data
-for GOOG, INTC, DRAM (an ETF) and KEEL before being hardcoded here (not
+for a mega-cap, a mid-cap, a micro-cap and an ETF before being hardcoded here (not
 assumed from docs, which are inconsistent/stale across yfinance versions):
   - returnOnEquity, profitMargins, payoutRatio are FRACTIONS (0.487 = 48.7%)
     -> multiply by 100.
   - debtToEquity is ALREADY on a x100 scale (48.997 means a D/E of 0.49x)
     -> divide by 100 to get a plain ratio, matching scoring.py's formula.
   - dividendYield is ALREADY a plain percent number (0.26 means 0.26%,
-    confirmed against GOOG's real dividendRate/price) -> used as-is.
+    confirmed against a dividend payer's real dividendRate/price) -> used as-is.
 """
 
 import os
@@ -94,7 +94,7 @@ def fetch_fundamentals(symbol):
     roe, net_margin, debt_to_equity, current_ratio, dividend_yield,
     dividend_payout_ratio, value_traded) let score_stock() work unchanged.
     Extra keys are for display only (name, sector, analyst consensus, etc).
-    An ETF (e.g. DRAM) legitimately has most fundamental fields as None —
+    An ETF legitimately has most fundamental fields as None —
     that's real, not a bug; the dashboard shows it as "no data" rather than
     guessing, same as everywhere else in this codebase.
     """
@@ -375,7 +375,7 @@ def _load_from_cache(symbol, cache_dir):
 if __name__ == "__main__":
     from logger import setup_logging
     setup_logging()
-    for sym in ['GOOG', 'INTC', 'DRAM']:
+    for sym in ['AAPL', 'MSFT', 'SPY']:
         print(f"\n=== {sym} ===")
         hist = fetch_history(sym, period='1mo')
         print(f"history: {len(hist) if hist is not None else 0} rows")

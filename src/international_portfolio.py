@@ -4,7 +4,7 @@ layer. Sibling to portfolio.py (NSE stocks) and bonds_portfolio.py (Kenya
 bonds); same private-by-default discipline as both (see portfolio/README.md
 and the portfolio-privacy-rule memory: real holdings are NEVER committed).
 
-Reads the user's PRIVATE holdings (portfolio/international_holdings.json,
+Reads the user's PRIVATE holdings (portfolio/international_holdings.csv, or the older .json,
 gitignored) and computes live performance using data this pipeline run
 already fetched via international_data.py (Yahoo Finance) and already ran
 through the SAME AnalysisEngine/scoring used for NSE stocks — nothing here
@@ -29,10 +29,12 @@ import json
 import datetime as dt
 
 from logger import get_logger
+import portfolio_csv
 
 logger = get_logger(__name__)
 
 HOLDINGS_FILE = "international_holdings.json"
+HOLDINGS_CSV_FILE = "international_holdings.csv"
 HISTORY_FILE = "international_history.json"
 
 # Wall Street analyst consensus -> (label, css class). Reuses the SAME
@@ -63,12 +65,39 @@ def _holdings_path(portfolio_dir):
     return os.path.join(portfolio_dir, HOLDINGS_FILE)
 
 
-def load_holdings(portfolio_dir):
-    """Return [{symbol, quantity, buy_price, buy_date, note}]. [] if the
-    file doesn't exist or can't be parsed — never raises."""
-    path = _holdings_path(portfolio_dir)
-    if not os.path.exists(path):
+def _load_holdings_csv(path):
+    """international_holdings.csv -> lots (same shape as the JSON path)."""
+    name = os.path.basename(path)
+    try:
+        rows = portfolio_csv.read_rows(path, portfolio_csv.STOCK_LOT_FIELDS)
+    except portfolio_csv.CsvFormatError as e:
+        logger.warning(f"Intl portfolio: {e} — no holdings loaded from this file.")
         return []
+    out = []
+    for line_no, r in rows:
+        qty, price = r["quantity"], r["buy_price"]
+        if qty <= 0 or price <= 0:
+            logger.warning(f"Intl portfolio: {name} line {line_no}: quantity and buy_price must "
+                           f"be above zero — skipping this row")
+            continue
+        out.append({
+            "symbol": r["symbol"].strip().upper(), "quantity": qty, "buy_price": price,
+            "buy_date": r.get("buy_date"), "note": r.get("note") or "",
+        })
+    logger.info(f"Intl portfolio: loaded {len(out)} lot(s) from {name}")
+    return out
+
+
+def load_holdings(portfolio_dir):
+    """Return [{symbol, quantity, buy_price, buy_date, note}]. Reads
+    international_holdings.csv if it exists, otherwise the .json (see
+    portfolio_csv.pick_source). [] if neither exists or the file can't be
+    parsed — never raises."""
+    kind, path = portfolio_csv.pick_source(portfolio_dir, HOLDINGS_CSV_FILE, HOLDINGS_FILE)
+    if kind is None:
+        return []
+    if kind == "csv":
+        return _load_holdings_csv(path)
     try:
         with open(path) as f:
             data = json.load(f)
@@ -95,8 +124,20 @@ def load_holdings(portfolio_dir):
 
 
 def add_lot(portfolio_dir, symbol, quantity, buy_price, buy_date=None, note=""):
-    """Append one new lot (creating the file if needed). Used by
-    add_international_holding.py. Returns the updated full lot list."""
+    """Append one new lot and return the updated full lot list. Used by
+    add_international_holding.py. Goes to international_holdings.csv if it
+    exists (added in the file's own column layout), otherwise the .json
+    (created if needed) — never to a JSON file a CSV is shadowing."""
+    csv_path = os.path.join(portfolio_dir, HOLDINGS_CSV_FILE)
+    if os.path.exists(csv_path):
+        dropped = portfolio_csv.append_row(csv_path, portfolio_csv.STOCK_LOT_FIELDS, {
+            "symbol": symbol.strip().upper(), "quantity": float(quantity),
+            "buy_price": float(buy_price), "buy_date": buy_date, "note": note or "",
+        })
+        if dropped:
+            logger.warning(f"{HOLDINGS_CSV_FILE} has no column for {', '.join(dropped)}, so that "
+                           f"value was not saved — add the column to its header row to keep it.")
+        return load_holdings(portfolio_dir)
     path = _holdings_path(portfolio_dir)
     os.makedirs(portfolio_dir, exist_ok=True)
     data = {"holdings": []}

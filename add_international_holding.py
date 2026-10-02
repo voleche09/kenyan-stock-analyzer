@@ -3,13 +3,18 @@
 Add an international (US-listed, USD) stock purchase to your private
 portfolio (portfolio/international_holdings.json).
 
+Prefer a spreadsheet? Keep your holdings in portfolio/international_holdings.csv
+instead (see portfolio/README.md). This script works with either: it adds the
+new purchase as a row at the end of international_holdings.csv if that file
+exists, otherwise to international_holdings.json.
+
 Usage:
     python3 add_international_holding.py SYMBOL QUANTITY BUY_PRICE_USD [BUY_DATE] [--note "text"]
 
 Examples:
-    python3 add_international_holding.py GOOG 7 264.06
-    python3 add_international_holding.py GOOG 7 264.06 2026-09-20
-    python3 add_international_holding.py UBER 15 74.88 --note "long-term hold"
+    python3 add_international_holding.py AAPL 10 190.25
+    python3 add_international_holding.py AAPL 10 190.25 2026-09-20
+    python3 add_international_holding.py MSFT 5 410.00 --note "long-term hold"
 
 Run this every time you buy more of a stock — even one you already hold.
 Each purchase is added as its own lot; the dashboard automatically combines
@@ -24,8 +29,12 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
+import venv_check
+venv_check.require_project_packages("portfolio/international_holdings.csv")
+
 from config import Config
 import international_portfolio as IP
+import portfolio_csv
 
 
 def die(msg):
@@ -75,7 +84,10 @@ def main():
             die(f"buy_date must be YYYY-MM-DD, got '{buy_date}'")
 
     config = Config()
-    lots = IP.add_lot(config.portfolio_dir, symbol, quantity, buy_price, buy_date, note)
+    try:
+        lots = IP.add_lot(config.portfolio_dir, symbol, quantity, buy_price, buy_date, note)
+    except ValueError as e:      # the holdings file is unreadable or malformed
+        sys.exit(f"Error: {e}")
 
     print(f"✓ Added: {quantity:g} shares of {symbol} @ ${buy_price:g}"
           f"{f' on {buy_date}' if buy_date else ''}")
@@ -85,6 +97,7 @@ def main():
           f"weighted avg cost ${agg['avg_cost']:.2f}, "
           f"total cost basis ${agg['cost_basis']:,.2f} "
           f"(across {len(agg['lots'])} lot{'s' if len(agg['lots']) != 1 else ''})")
+    print(f"  {portfolio_csv.saved_to_message(config.portfolio_dir, IP.HOLDINGS_CSV_FILE, IP.HOLDINGS_FILE)}")
     print(f"\nRun ./run.sh to see it reflected in the 🌍 My International Portfolio "
           f"section with today's live price and gain/loss.")
 

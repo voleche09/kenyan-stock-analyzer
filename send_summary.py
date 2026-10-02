@@ -143,7 +143,7 @@ def main():
     except Exception as e:
         logger.warning(f"Scoring skipped: {e}")
 
-    # ---- Personal portfolio (private — portfolio/holdings.json, gitignored) ----
+    # ---- Personal portfolio (private — portfolio/holdings.csv or holdings.json, gitignored) ----
     # Doesn't exist on a fresh GitHub Actions checkout, so this is a silent
     # no-op there; on your own machine it picks up your real holdings.
     portfolio_summary = None

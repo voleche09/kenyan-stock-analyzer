@@ -3246,7 +3246,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             if not has_stocks:
                 return ('<div class="nw-card"><h4>📈 Stocks</h4>'
                         '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
-                        '<code style="color:#93c5fd;">python3 add_holding.py SCOM 500 34.50</code></p></div>')
+                        'add a row to <code style="color:#93c5fd;">portfolio/holdings.csv</code></p></div>')
             day_txt = f'{stocks_day_pct:+.2f}%' if stocks_day_pct is not None else '—'
             day_color = '#4ade80' if (stocks_day_pct or 0) >= 0 else '#f87171'
             gain_color = '#4ade80' if stocks_gain >= 0 else '#f87171'
@@ -3264,7 +3264,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             if not has_bonds:
                 return ('<div class="nw-card"><h4>🏦 Bonds</h4>'
                         '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
-                        '<code style="color:#93c5fd;">python3 add_bond.py IFB1/2023/6.5 150000</code></p></div>')
+                        'add a row to <code style="color:#93c5fd;">portfolio/bonds.csv</code></p></div>')
             return (
                 '<div class="nw-card"><h4>🏦 Bonds <a href="#bonds-top" style="float:right;'
                 'font-size:0.7rem;color:#93c5fd;">jump ↓</a></h4>'
@@ -3279,7 +3279,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             if not has_intl:
                 return ('<div class="nw-card"><h4>🌍 International</h4>'
                         '<p style="font-size:0.8rem;color:#94a3b8;margin:0;">None added yet — '
-                        '<code style="color:#93c5fd;">python3 add_international_holding.py GOOG 7 264.06</code></p></div>')
+                        'add a row to <code style="color:#93c5fd;">portfolio/international_holdings.csv</code></p></div>')
             day_txt = f'{intl_day_pct:+.2f}%' if intl_day_pct is not None else '—'
             day_color = '#4ade80' if (intl_day_pct or 0) >= 0 else '#f87171'
             gain_color = '#4ade80' if intl_gain_usd >= 0 else '#f87171'
@@ -3349,20 +3349,23 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         history_rows = history_rows or []
         news = news or []
 
-        # ---------- empty state: no holdings.json yet ----------
+        # ---------- empty state: no holdings.csv / holdings.json yet ----------
         if not portfolio_summary:
             return (
                 '<div class="section"><h2>💼 My Portfolio</h2>'
                 '<p class="page-intro">You haven\'t added any holdings yet. This page is 100% private — '
-                'your holdings live in <code>portfolio/holdings.json</code> on your own machine and are '
+                'your holdings live in <code>portfolio/holdings.csv</code> on your own machine and are '
                 '<strong>never committed to git</strong>.</p>'
                 '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
-                '<strong>Add your first purchase — two ways:</strong>'
-                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<strong>Add your first purchase — easiest way, a spreadsheet:</strong>'
+                '<p style="margin:10px 0 4px;">Copy <code>portfolio/holdings.example.csv</code> to '
+                '<code>portfolio/holdings.csv</code>, replace the example rows with your own (one row per '
+                'purchase; columns <code>symbol, quantity, buy_price, buy_date, note</code>) in Excel, '
+                'Numbers or Google Sheets, and save it as CSV. Exact format: '
+                '<code>portfolio/README.md</code>.</p>'
+                '<p style="margin:10px 0 4px;">Prefer the terminal? From the project folder:</p>'
                 '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
-                'overflow-x:auto;font-size:0.85rem;">python3 add_holding.py SCOM 500 34.50</pre>'
-                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/holdings.json</code> directly — '
-                'see <code>portfolio/README.md</code> for the exact format.</p>'
+                'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_holding.py SCOM 500 34.50</pre>'
                 '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this page fills in: '
                 'live value, gain/loss, dividends, sector allocation, charts, news on your holdings, '
                 'and daily/weekly/monthly/yearly performance as history builds up.</p>'
@@ -3623,11 +3626,14 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             '<details class="section-details"><summary>'
             '<h2>➕ Add a New Purchase</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
-            '<p class="page-intro">Every time you buy — even more of a stock you already hold:</p>'
+            '<p class="page-intro">Every time you buy — even more of a stock you already hold — add one '
+            'row to <code>portfolio/holdings.csv</code> (columns <code>symbol, quantity, buy_price, '
+            'buy_date, note</code>) in your spreadsheet app, save it as CSV, and re-run '
+            '<code>./run.sh</code>. Or let a helper script add the row for you (it writes to '
+            '<code>holdings.csv</code> if you have one):</p>'
             '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
-            'overflow-x:auto;font-size:0.85rem;">python3 add_holding.py SYMBOL QUANTITY PRICE [DATE]\n'
-            'python3 add_holding.py SCOM 500 34.50\n'
-            'python3 add_holding.py SCOM 500 34.50 2026-09-20</pre>'
+            'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_holding.py SYMBOL QUANTITY PRICE [DATE]\n'
+            './venv/bin/python3 add_holding.py SCOM 500 34.50 2026-09-20</pre>'
             '<div class="dq-note">Multiple purchases of the same stock combine automatically into one row '
             'with a correctly weighted average cost. Full details in portfolio/README.md. Nothing here is '
             'ever committed to git.</div></div></details>')
@@ -3731,21 +3737,23 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         is fabricated. '' is never returned — an empty portfolio gets a
         clear how-to-add empty state, same discipline as stocks.
         """
-        # ---------- empty state: no bonds.json yet ----------
+        # ---------- empty state: no bonds.csv / bonds.json yet ----------
         if not bond_portfolio:
             return (
                 '<div class="section"><h2>🏦 My Bonds</h2>'
                 '<p class="page-intro">You haven\'t added any bond holdings yet. Like your stock '
                 'holdings above, this is 100% private — your bonds live in '
-                '<code>portfolio/bonds.json</code> on your own machine and are '
+                '<code>portfolio/bonds.csv</code> on your own machine and are '
                 '<strong>never committed to git</strong>.</p>'
                 '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
-                '<strong>Add your first bond — two ways:</strong>'
-                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<strong>Add your first bond — easiest way, a spreadsheet:</strong>'
+                '<p style="margin:10px 0 4px;">Copy <code>portfolio/bonds.example.csv</code> to '
+                '<code>portfolio/bonds.csv</code>, replace the example rows with your own (one row per '
+                'purchase; columns <code>issue, face_value, purchase_price_pct, purchase_date, note</code>) '
+                'and save it as CSV. Exact format: <code>portfolio/README.md</code>.</p>'
+                '<p style="margin:10px 0 4px;">Prefer the terminal? From the project folder:</p>'
                 '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
-                'overflow-x:auto;font-size:0.85rem;">python3 add_bond.py IFB1/2023/6.5 150000</pre>'
-                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/bonds.json</code> directly — '
-                'see <code>portfolio/README.md</code> for the exact format.</p>'
+                'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_bond.py IFB1/2023/6.5 150000</pre>'
                 '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this section fills in: '
                 'accrued interest, next payment date &amp; amount, the full cash-flow schedule to '
                 'redemption, after-tax income, running yield and total return — plus charts.</p>'
@@ -4031,11 +4039,14 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             '<details class="section-details"><summary>'
             '<h2>➕ Add a New Bond</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
-            '<p class="page-intro">Every time you buy a new bond, or top up an existing one:</p>'
+            '<p class="page-intro">Every time you buy a new bond, or top up an existing one, add one row '
+            'to <code>portfolio/bonds.csv</code> (columns <code>issue, face_value, purchase_price_pct, '
+            'purchase_date, note</code>) in your spreadsheet app, save it as CSV, and re-run '
+            '<code>./run.sh</code>. Or let a helper script add the row for you (it writes to '
+            '<code>bonds.csv</code> if you have one):</p>'
             '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
-            'overflow-x:auto;font-size:0.85rem;">python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE]\n'
-            'python3 add_bond.py IFB1/2023/6.5 150000\n'
-            'python3 add_bond.py FXD1/2022/025 250000 100.0 2022-09-23</pre>'
+            'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE]\n'
+            './venv/bin/python3 add_bond.py FXD1/2022/025 250000 100.0 2022-09-23</pre>'
             '<div class="dq-note">Full details, including how the small-holder amortization rule and '
             'tax treatment are determined, in <code>portfolio/README.md</code> and '
             '<code>src/bonds_portfolio.py</code>. Nothing here is ever committed to git.</div></div></details>')
@@ -4108,15 +4119,18 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 '<a id="intl-top"></a>'
                 '<div class="section"><h2>🌍 My International Portfolio</h2>'
                 '<p class="page-intro">You haven\'t added any international holdings yet. This page is '
-                '100% private — your holdings live in <code>portfolio/international_holdings.json</code> '
+                '100% private — your holdings live in <code>portfolio/international_holdings.csv</code> '
                 'on your own machine and are <strong>never committed to git</strong>.</p>'
                 '<div style="background:#eff6ff;border-radius:10px;padding:16px 20px;margin-top:10px;">'
-                '<strong>Add your first position — two ways:</strong>'
-                '<p style="margin:10px 0 4px;">1. From the terminal:</p>'
+                '<strong>Add your first position — easiest way, a spreadsheet:</strong>'
+                '<p style="margin:10px 0 4px;">Copy <code>portfolio/international_holdings.example.csv</code> '
+                'to <code>portfolio/international_holdings.csv</code>, replace the example rows with your '
+                'own (one row per purchase; columns <code>symbol, quantity, buy_price, buy_date, note</code> '
+                '— <code>buy_price</code> in USD) and save it as CSV. Exact format: '
+                '<code>portfolio/README.md</code>.</p>'
+                '<p style="margin:10px 0 4px;">Prefer the terminal? From the project folder:</p>'
                 '<pre style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;'
-                'overflow-x:auto;font-size:0.85rem;">python3 add_international_holding.py GOOG 7 264.06</pre>'
-                '<p style="margin:10px 0 4px;">2. Or edit <code>portfolio/international_holdings.json</code> '
-                'directly — see <code>portfolio/README.md</code> for the exact format.</p>'
+                'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_international_holding.py AAPL 10 190.25</pre>'
                 '<p style="margin-top:10px;">Then re-run <code>./run.sh</code> and this section fills in: '
                 'live USD value, gain/loss, dividends, analyst consensus, charts, and news.</p>'
                 '</div></div>')
@@ -4331,11 +4345,14 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             '<details class="section-details"><summary>'
             '<h2>➕ Add a New International Position</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
-            '<p class="page-intro">Every time you buy — even more of a stock you already hold:</p>'
+            '<p class="page-intro">Every time you buy — even more of a stock you already hold — add one '
+            'row to <code>portfolio/international_holdings.csv</code> (columns <code>symbol, quantity, '
+            'buy_price, buy_date, note</code>; <code>buy_price</code> in USD) in your spreadsheet app, '
+            'save it as CSV, and re-run <code>./run.sh</code>. Or let a helper script add the row for you '
+            '(it writes to <code>international_holdings.csv</code> if you have one):</p>'
             '<pre style="background:#0f172a;color:#e2e8f0;padding:12px 16px;border-radius:8px;'
-            'overflow-x:auto;font-size:0.85rem;">python3 add_international_holding.py SYMBOL QUANTITY PRICE_USD [DATE]\n'
-            'python3 add_international_holding.py GOOG 7 264.06\n'
-            'python3 add_international_holding.py GOOG 7 264.06 2026-09-20</pre>'
+            'overflow-x:auto;font-size:0.85rem;">./venv/bin/python3 add_international_holding.py SYMBOL QUANTITY PRICE_USD [DATE]\n'
+            './venv/bin/python3 add_international_holding.py AAPL 10 190.25 2026-09-20</pre>'
             '<div class="dq-note">Multiple purchases of the same stock combine automatically into one row '
             'with a correctly weighted average cost. Full details in portfolio/README.md. Nothing here is '
             'ever committed to git.</div></div></details>')

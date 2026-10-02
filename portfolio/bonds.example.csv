@@ -1,0 +1,3 @@
+issue,face_value,purchase_price_pct,purchase_date,note
+IFB1/2023/6.5,150000,101.33,2023-12-11,EXAMPLE lot - bought slightly above par at a tap sale
+FXD1/2022/025,350000,100,,purchase_price_pct and purchase_date are optional - 100 (par) and blank if unsure

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Add a Treasury/Infrastructure bond holding to your private portfolio
-(portfolio/bonds.json).
+(portfolio/bonds.json). Prefer a spreadsheet? Keep your bonds in
+portfolio/bonds.csv instead (see portfolio/README.md). This script works with
+either: it adds the new bond as a row at the end of bonds.csv if that file
+exists, otherwise to bonds.json.
 
 Usage:
     python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE] [--note "text"]
@@ -31,8 +34,12 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
+import venv_check
+venv_check.require_project_packages("portfolio/bonds.csv")
+
 from config import Config
 import bonds_portfolio as B
+import portfolio_csv
 
 
 def die(msg):
@@ -83,7 +90,10 @@ def main():
             die(f"purchase_date must be YYYY-MM-DD, got '{purchase_date}'")
 
     config = Config()
-    bonds = B.add_bond(config.portfolio_dir, issue, face_value, price_pct, purchase_date, note)
+    try:
+        bonds = B.add_bond(config.portfolio_dir, issue, face_value, price_pct, purchase_date, note)
+    except ValueError as e:      # the bonds file is unreadable or malformed
+        sys.exit(f"Error: {e}")
 
     print(f"✓ Added: KES {face_value:,.0f} face value of {issue}"
           f"{f' @ {price_pct:g}% of face' if price_pct != 100.0 else ' (at par)'}"
@@ -105,6 +115,7 @@ def main():
               f"'unrecognized' on the dashboard. Add it to BOND_REFERENCE in "
               f"src/bonds_portfolio.py (cite the CBK prospectus) for full figures.")
 
+    print(f"  {portfolio_csv.saved_to_message(config.portfolio_dir, B.BONDS_CSV_FILE, B.BONDS_FILE)}")
     print(f"\nRun ./run.sh to see it reflected in the 🏦 My Bonds section of the "
           f"💼 My Portfolio tab.")
 

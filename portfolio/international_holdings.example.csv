@@ -1,0 +1,4 @@
+symbol,quantity,buy_price,buy_date,note
+AAPL,10,190.25,2026-03-14,EXAMPLE lot - buy_price is in USD (not KES)
+MSFT,5,410.00,,buy_date is optional - leave it blank if you do not remember
+NVDA,1.5,120.00,2026-05-02,Fractional shares are fine
