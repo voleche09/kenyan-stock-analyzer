@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
 Add a Treasury/Infrastructure bond holding to your private portfolio
-(portfolio/bonds.json). Prefer a spreadsheet? You don't need this script:
-put your bonds in portfolio/bonds.csv instead (see portfolio/README.md) —
-once that file exists it IS your portfolio, and this script will tell you
-to edit it.
+(portfolio/bonds.json). Prefer a spreadsheet? Keep your bonds in
+portfolio/bonds.csv instead (see portfolio/README.md). This script works with
+either: it adds the new bond as a row at the end of bonds.csv if that file
+exists, otherwise to bonds.json.
 
 Usage:
     python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE] [--note "text"]
@@ -39,6 +39,7 @@ venv_check.require_project_packages("portfolio/bonds.csv")
 
 from config import Config
 import bonds_portfolio as B
+import portfolio_csv
 
 
 def die(msg):
@@ -91,7 +92,7 @@ def main():
     config = Config()
     try:
         bonds = B.add_bond(config.portfolio_dir, issue, face_value, price_pct, purchase_date, note)
-    except ValueError as e:      # bonds.csv is in use, or bonds.json is corrupt
+    except ValueError as e:      # the bonds file is unreadable or malformed
         sys.exit(f"Error: {e}")
 
     print(f"✓ Added: KES {face_value:,.0f} face value of {issue}"
@@ -114,6 +115,7 @@ def main():
               f"'unrecognized' on the dashboard. Add it to BOND_REFERENCE in "
               f"src/bonds_portfolio.py (cite the CBK prospectus) for full figures.")
 
+    print(f"  {portfolio_csv.saved_to_message(config.portfolio_dir, B.BONDS_CSV_FILE, B.BONDS_FILE)}")
     print(f"\nRun ./run.sh to see it reflected in the 🏦 My Bonds section of the "
           f"💼 My Portfolio tab.")
 

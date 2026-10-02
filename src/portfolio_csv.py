@@ -1,7 +1,7 @@
 """
 CSV input for the private portfolio files — the spreadsheet-friendly way to
 enter holdings (Excel, Numbers and Google Sheets all export CSV), so adding a
-purchase is "add a row and save" rather than running a script.
+purchase is "add a row and save" rather than editing JSON.
 
 Three files, one per asset class, mirroring the three JSON files they can
 replace (each has its own currency and meaning, so they stay separate):
@@ -33,7 +33,12 @@ about things that would silently corrupt money figures:
 
 Problems are logged with the file name and line number; a bad row is skipped
 (or, for an optional field, just that value is dropped) — one typo never takes
-the rest of the portfolio down with it.
+the rest of the portfolio down.
+
+append_row() is what the add_*.py helper scripts use when a CSV is the
+portfolio: it adds one row at the end of the file in the file's OWN column
+order and spelling, keeping its BOM, line endings and encoding, so a file
+exported from a spreadsheet stays intact.
 """
 
 import csv
@@ -109,14 +114,14 @@ def pick_source(portfolio_dir, csv_name, json_name):
     return None, None
 
 
-def csv_in_use_message(csv_path, fields):
-    """Why the add_*.py helper scripts refuse to write when a CSV is the portfolio."""
-    name = os.path.basename(csv_path)
-    cols = ", ".join(f.name for f in fields)
-    return (f"{name} exists, so it is your portfolio — a script that appended to the older "
-            f"JSON file would write somewhere that is ignored. Add a row to {name} in your "
-            f"spreadsheet app instead (columns: {cols}), save it, and re-run ./run.sh. "
-            f"(To go back to the JSON file, delete or rename {name}.)")
+def saved_to_message(portfolio_dir, csv_name, json_name):
+    """One line for the add_*.py helper scripts: where the row just went, plus
+    the one real hazard of editing a file behind a spreadsheet app's back."""
+    if os.path.exists(os.path.join(portfolio_dir, csv_name)):
+        return (f"Saved to portfolio/{csv_name}. (If that file is open in Excel, Numbers or "
+                f"Sheets, close it WITHOUT saving or reload it — otherwise the app overwrites "
+                f"this new row the next time you save.)")
+    return f"Saved to portfolio/{json_name}."
 
 
 # ----------------------------------------------------------------------------
@@ -193,7 +198,7 @@ def _parse_cell(kind, raw):
 
 
 # ----------------------------------------------------------------------------
-# The reader
+# File access + header handling (shared by reading and appending)
 # ----------------------------------------------------------------------------
 def _norm_header(h):
     """'Avg Price (USD)' -> 'avg_price' ; ' Buy-Date ' -> 'buy_date'."""
@@ -202,33 +207,23 @@ def _norm_header(h):
     return re.sub(r"[^a-z0-9]+", "_", h).strip("_")
 
 
-def _read_text(path):
-    with open(path, "rb") as f:
-        raw = f.read()
-    try:
-        text = raw.decode("utf-8-sig")      # Excel's "CSV UTF-8" starts with a BOM
-    except UnicodeDecodeError:
-        text = raw.decode("cp1252", errors="replace")   # older Excel "CSV" on Windows/Mac
-    return text.lstrip("﻿")
-
-
-def read_rows(path, fields):
-    """
-    Parse a portfolio CSV into [(line_number, {field_name: value}), ...] with
-    values already converted (numbers -> float, dates -> 'YYYY-MM-DD', text ->
-    str, blank -> None). Rows that are entirely blank are skipped silently;
-    rows with a bad/missing REQUIRED value are skipped with a warning; a bad
-    OPTIONAL value is dropped (set to None) with a warning.
-
-    An empty file, or one with only a header, is an empty portfolio ([]).
-    Raises CsvFormatError if the file can't be used at all.
-    """
+def _load(path):
+    """Return (raw_bytes, text, encoding). Excel's "CSV UTF-8" starts with a
+    BOM (stripped here); older Excel "CSV" exports are Windows-1252."""
     name = os.path.basename(path)
     try:
-        text = _read_text(path)
+        with open(path, "rb") as f:
+            raw = f.read()
     except OSError as e:
         raise CsvFormatError(f"{name} could not be read ({e})")
+    try:
+        return raw, raw.decode("utf-8-sig").lstrip("﻿"), "utf-8"
+    except UnicodeDecodeError:
+        return raw, raw.decode("cp1252", errors="replace").lstrip("﻿"), "cp1252"
 
+
+def _split_table(name, text):
+    """-> (header cells or None if the file is empty, [(line_number, cells), ...])."""
     reader = csv.reader(io.StringIO(text, newline=""))
     header, body = None, []
     for cells in reader:
@@ -237,14 +232,16 @@ def read_rows(path, fields):
                 header = cells
             continue
         body.append((reader.line_num, cells))
-    if header is None:
-        return []
-
-    if len(header) == 1 and re.search(r"[;\t|]", header[0]):
+    if header is not None and len(header) == 1 and re.search(r"[;\t|]", header[0]):
         raise CsvFormatError(
             f"{name} looks semicolon- or tab-separated, not comma-separated. Re-export it as "
             f"comma-separated (Excel: 'CSV UTF-8 (Comma delimited)'; Numbers: Export To > CSV)")
+    return header, body
 
+
+def _resolve_columns(name, header, fields):
+    """Map each field to its column index (canonical name first, then aliases).
+    Raises CsvFormatError if a required column is missing. -> (colmap, used_indexes)."""
     norm = [_norm_header(h) for h in header]
     colmap, used = {}, set()
     for f in fields:
@@ -259,6 +256,30 @@ def read_rows(path, fields):
                            for f in missing)
         found = ", ".join(h.strip() for h in header if h.strip()) or "(none)"
         raise CsvFormatError(f"{name} is missing required column(s): {detail}. Columns found: {found}")
+    return colmap, used
+
+
+# ----------------------------------------------------------------------------
+# Reading
+# ----------------------------------------------------------------------------
+def read_rows(path, fields):
+    """
+    Parse a portfolio CSV into [(line_number, {field_name: value}), ...] with
+    values already converted (numbers -> float, dates -> 'YYYY-MM-DD', text ->
+    str, blank -> None). Rows that are entirely blank are skipped silently;
+    rows with a bad/missing REQUIRED value are skipped with a warning; a bad
+    OPTIONAL value is dropped (set to None) with a warning.
+
+    An empty file, or one with only a header, is an empty portfolio ([]).
+    Raises CsvFormatError if the file can't be used at all.
+    """
+    name = os.path.basename(path)
+    _raw, text, _enc = _load(path)
+    header, body = _split_table(name, text)
+    if header is None:
+        return []
+
+    colmap, used = _resolve_columns(name, header, fields)
     ignored = [header[i].strip() for i in range(len(header)) if i not in used and header[i].strip()]
     if ignored:
         logger.info(f"{name}: ignoring unrecognized column(s): {', '.join(ignored)}")
@@ -288,3 +309,58 @@ def read_rows(path, fields):
             continue
         out.append((line_no, record))
     return out
+
+
+# ----------------------------------------------------------------------------
+# Appending (used by the add_*.py helper scripts)
+# ----------------------------------------------------------------------------
+def _format_cell(value):
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else repr(value)
+    return str(value)
+
+
+def append_row(path, fields, values):
+    """
+    Add one row to the END of an existing portfolio CSV and return the list of
+    field names that could not be stored because the file has no matching
+    (optional) column.
+
+    The row follows the file's own header — its column order and spelling
+    ("Ticker", "Qty", "Avg Price (USD)" all work) — and the file's own line
+    endings, BOM and encoding are preserved, with one binary append, so a file
+    exported from Excel, Numbers or Sheets stays intact. Raises CsvFormatError
+    (a ValueError) if the file has no header row or lacks a required column.
+
+    values: {field_name: value}; None or "" leaves that cell empty.
+    """
+    name = os.path.basename(path)
+    raw, text, encoding = _load(path)
+    header, _body = _split_table(name, text)
+    if header is None:
+        raise CsvFormatError(
+            f"{name} has no header row — copy the matching *.example.csv template, or start the "
+            f"file with: {','.join(f.name for f in fields)}")
+    colmap, _used = _resolve_columns(name, header, fields)
+
+    cells, dropped = [""] * len(header), []
+    for f in fields:
+        value = values.get(f.name)
+        if value is None or value == "":
+            continue
+        idx = colmap.get(f.name)
+        if idx is None:
+            dropped.append(f.name)
+        else:
+            cells[idx] = _format_cell(value)
+
+    terminator = ("\r\n" if b"\r\n" in raw else "\n" if b"\n" in raw
+                  else "\r" if b"\r" in raw else "\n")
+    row = io.StringIO()
+    csv.writer(row, lineterminator=terminator).writerow(cells)
+    # A file saved without a final newline would otherwise glue the new row onto its last line.
+    needs_break = bool(raw) and not raw.endswith((b"\n", b"\r"))
+    payload = (terminator if needs_break else "") + row.getvalue()
+    with open(path, "ab") as f:
+        f.write(payload.encode(encoding, errors="replace"))
+    return dropped

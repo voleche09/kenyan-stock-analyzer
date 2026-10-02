@@ -318,8 +318,8 @@ docker compose exec generator sh -c 'cat /app/.crontab; date'
 
 # Record a purchase: edit portfolio/holdings.csv (or international_holdings.csv / bonds.csv)
 # on the host — the folder is bind-mounted, so the next run picks it up. See portfolio/README.md.
-# (Only if you still use the older JSON files, the helper scripts work in the container too:
-#  docker compose exec generator python3 add_holding.py SCOM 500 34.50 )
+# Or have the helper script append the row (it writes to the CSV if you have one, else the JSON):
+docker compose exec generator python3 add_holding.py SCOM 500 34.50
 
 # Restart (e.g. after editing .env)
 docker compose up -d
@@ -363,7 +363,7 @@ kenyan_stock_analyzer/
 ├── send_summary.py             # Builds the 1-page PDF summary and emails it (daily job)
 ├── docker_scheduled_run.py     # Docker's scheduled job: market-closed check + full pipeline
 ├── run.sh                      # One-command runner, bare metal (venv + pipeline + open dashboard)
-├── add_holding.py / add_bond.py / add_international_holding.py   # Optional terminal helpers for the older JSON portfolio files
+├── add_holding.py / add_bond.py / add_international_holding.py   # Optional terminal helpers: append a purchase to your portfolio CSV (or JSON)
 ├── scheduler.py                # Optional scheduler for automated daily runs
 ├── .github/workflows/          # GitHub Actions — daily-summary.yml (scheduled email)
 ├── Dockerfile                  # Multi-stage image: Python app + supercronic scheduler

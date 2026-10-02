@@ -439,17 +439,83 @@ class TestPortfolioCsv(unittest.TestCase):
                     "SCOM,500,34.5,2026-09-20,n\nKCB,200,92,,\n")
         self.assertEqual(portfolio_mod.load_holdings(a), portfolio_mod.load_holdings(b))
 
-    def test_add_scripts_refuse_to_write_to_json_when_a_csv_is_the_portfolio(self):
-        cases = [("holdings.csv", portfolio_mod.add_lot, ("A", 1, 2)),
-                 ("international_holdings.csv", international_portfolio.add_lot, ("A", 1, 2)),
-                 ("bonds.csv", bonds_portfolio.add_bond, ("IFB1/2023/6.5", 100000))]
-        for csv_name, fn, args in cases:
-            path = self.write(csv_name, "header\n")
-            with self.assertRaises(ValueError, msg=csv_name) as ctx:
-                fn(self.dir, *args)
-            self.assertIn(csv_name, str(ctx.exception))
-            self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".json")], [])
-            os.remove(path)
+    # ---- adding a purchase when a CSV is the portfolio ----
+
+    def test_add_lot_appends_a_row_to_the_csv_instead_of_a_shadowed_json(self):
+        path = self.write("holdings.csv", "symbol,quantity,buy_price,buy_date,note\nSCOM,10,20,,\n")
+        lots = portfolio_mod.add_lot(self.dir, "kcb", 5, 40.5, "2026-01-02", "top up")
+        with open(path, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read(), "symbol,quantity,buy_price,buy_date,note\n"
+                                       "SCOM,10,20,,\nKCB,5,40.5,2026-01-02,top up\n")
+        self.assertEqual([l["symbol"] for l in lots], ["SCOM", "KCB"])          # returned list = full portfolio
+        self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".json")], [])   # no ignored JSON written
+
+    def test_append_keeps_bom_windows_line_endings_and_handles_a_missing_final_newline(self):
+        # Exactly what Excel's "CSV UTF-8" produces — and a hand-saved file with no trailing newline.
+        original = b"\xef\xbb\xbfsymbol,quantity,buy_price\r\nSCOM,10,20"          # no final CRLF
+        path = self.write("holdings.csv", original)
+        portfolio_mod.add_lot(self.dir, "KCB", 5, 40)
+        with open(path, "rb") as f:
+            raw = f.read()
+        self.assertTrue(raw.startswith(b"\xef\xbb\xbf"))                          # BOM kept, not duplicated
+        self.assertEqual(raw.count(b"\xef\xbb\xbf"), 1)
+        self.assertEqual(raw.replace(b"\r\n", b"").count(b"\n"), 0)               # no stray LF-only breaks
+        self.assertTrue(raw.startswith(original))                                   # existing bytes untouched
+        self.assertEqual([(l["symbol"], l["quantity"]) for l in portfolio_mod.load_holdings(self.dir)],
+                         [("SCOM", 10.0), ("KCB", 5.0)])                            # rows not glued together
+
+    def test_append_follows_the_files_own_column_order_and_spelling(self):
+        path = self.write("international_holdings.csv",
+                          "Notes,Avg Price (USD),Ticker,Qty,Date\nold,100,AAPL,2,2026-01-01\n")
+        international_portfolio.add_lot(self.dir, "msft", 3, 410.5, "2026-02-03", "new")
+        with open(path, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read().splitlines()[-1], "new,410.5,MSFT,3,2026-02-03")
+        lots = international_portfolio.load_holdings(self.dir)
+        self.assertEqual((lots[1]["symbol"], lots[1]["quantity"], lots[1]["buy_price"], lots[1]["buy_date"]),
+                         ("MSFT", 3.0, 410.5, "2026-02-03"))
+
+    def test_append_round_trips_notes_containing_commas_and_quotes(self):
+        self.write("holdings.csv", "symbol,quantity,buy_price,buy_date,note\n")
+        portfolio_mod.add_lot(self.dir, "SCOM", 1, 2, None, 'He said "buy, then hold"')
+        self.assertEqual(portfolio_mod.load_holdings(self.dir)[0]["note"], 'He said "buy, then hold"')
+
+    def test_append_says_so_when_the_csv_has_no_column_for_a_value(self):
+        self.write("holdings.csv", "symbol,quantity,buy_price\nSCOM,10,20\n")      # no buy_date / note columns
+        with mock.patch.object(portfolio_mod.logger, "warning") as warn:
+            portfolio_mod.add_lot(self.dir, "KCB", 5, 40, "2026-01-02", "hello")
+        self.assertIn("buy_date", warn.call_args[0][0])
+        self.assertIn("note", warn.call_args[0][0])
+        self.assertEqual(len(portfolio_mod.load_holdings(self.dir)), 2)             # the purchase itself still saved
+
+    def test_append_refuses_a_csv_it_cannot_safely_extend(self):
+        self.write("holdings.csv", "")                                              # no header at all
+        with self.assertRaises(ValueError):
+            portfolio_mod.add_lot(self.dir, "A", 1, 2)
+        self.write("holdings.csv", "symbol,quantity,price\nA,1,2\n")              # bare 'price' is not a cost column
+        with self.assertRaises(ValueError):
+            portfolio_mod.add_lot(self.dir, "B", 1, 2)
+
+    def test_add_bond_appends_to_the_csv_and_canonicalises_the_issue(self):
+        path = self.write("bonds.csv", "issue,face_value,purchase_price_pct,purchase_date,note\n")
+        bonds = bonds_portfolio.add_bond(self.dir, "fdx1/2022/025", 250000, 100.0, None, "")
+        with open(path, encoding="utf-8", newline="") as f:
+            self.assertEqual(f.read().splitlines()[-1], "FXD1/2022/025,250000,100,,")
+        self.assertEqual([b["issue"] for b in bonds], ["FXD1/2022/025"])
+        self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".json")], [])
+
+    def test_add_bond_without_a_price_column_is_fine_because_par_is_the_default(self):
+        self.write("bonds.csv", "issue,face_value\n")
+        with mock.patch.object(bonds_portfolio.logger, "warning") as warn:
+            bonds = bonds_portfolio.add_bond(self.dir, "IFB1/2023/6.5", 150000)      # price defaults to par
+        self.assertFalse(warn.called)
+        self.assertEqual(bonds[0]["purchase_price_pct"], 100.0)
+
+    def test_international_add_goes_to_its_own_csv_not_the_nse_one(self):
+        nse = self.write("holdings.csv", "symbol,quantity,buy_price\n")
+        intl = self.write("international_holdings.csv", "symbol,quantity,buy_price\n")
+        international_portfolio.add_lot(self.dir, "AAPL", 1, 190.25)
+        self.assertEqual(open(nse).read(), "symbol,quantity,buy_price\n")           # untouched
+        self.assertIn("AAPL,1,190.25", open(intl).read())
 
     def test_add_lot_still_creates_json_when_no_csv_exists(self):
         portfolio_mod.add_lot(self.dir, "a", 3, 4.5, "2026-01-02", "x")

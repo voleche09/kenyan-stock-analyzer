@@ -2,9 +2,10 @@
 """
 Add a stock purchase to your private portfolio (portfolio/holdings.json).
 
-Prefer a spreadsheet? You don't need this script: put your holdings in
-portfolio/holdings.csv instead (see portfolio/README.md). Once that file
-exists it IS your portfolio, and this script will tell you to edit it.
+Prefer a spreadsheet? Keep your holdings in portfolio/holdings.csv instead
+(see portfolio/README.md). This script works with either: it adds the new
+purchase as a row at the end of holdings.csv if that file exists, otherwise
+to holdings.json.
 
 Usage:
     python3 add_holding.py SYMBOL QUANTITY BUY_PRICE [BUY_DATE] [--note "text"]
@@ -32,6 +33,7 @@ venv_check.require_project_packages("portfolio/holdings.csv")
 
 from config import Config
 import portfolio as P
+import portfolio_csv
 
 
 def die(msg):
@@ -82,19 +84,20 @@ def main():
     config = Config()
     try:
         lots = P.add_lot(config.portfolio_dir, symbol, quantity, buy_price, buy_date, note)
-    except ValueError as e:      # holdings.csv is in use, or holdings.json is corrupt
+    except ValueError as e:      # the holdings file is unreadable or malformed
         sys.exit(f"Error: {e}")
 
     print(f"✓ Added: {quantity:g} shares of {symbol} @ KES {buy_price:g}"
           f"{f' on {buy_date}' if buy_date else ''}")
 
     # Show the updated aggregate position for this symbol (best-effort — no
-    # network call, just arithmetic over what's now in holdings.json).
+    # network call, just arithmetic over what's now in your holdings file).
     agg = P._aggregate_lots([l for l in lots if l["symbol"] == symbol])[symbol]
     print(f"  Your {symbol} position is now: {agg['quantity']:g} shares, "
           f"weighted avg cost KES {agg['avg_cost']:.2f}, "
           f"total cost basis KES {agg['cost_basis']:,.2f} "
           f"(across {len(agg['lots'])} lot{'s' if len(agg['lots']) != 1 else ''})")
+    print(f"  {portfolio_csv.saved_to_message(config.portfolio_dir, P.HOLDINGS_CSV_FILE, P.HOLDINGS_FILE)}")
     print(f"\nRun ./run.sh to see it reflected in the 💼 My Portfolio tab "
           f"with today's live price and gain/loss.")
 

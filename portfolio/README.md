@@ -46,7 +46,8 @@ If the count is lower than the number of rows you entered, a `WARNING` just
 above it names the file, the line number, and what was wrong with that row.
 
 That's the whole workflow. To record a new purchase later: add a row, save,
-re-run.
+re-run — or let a helper script add the row for you
+([see below](#prefer-the-terminal-helper-scripts)).
 
 ## The three files
 
@@ -188,6 +189,35 @@ Edit the row, or delete it. If you've sold a stock entirely, delete all of its
 rows. (This is a holdings tracker, not a trade ledger — it shows what you
 currently hold and doesn't record realized gains from sales.)
 
+## Prefer the terminal? Helper scripts
+
+`add_holding.py` (NSE stocks), `add_international_holding.py` (US stocks) and
+`add_bond.py` add one purchase for you. They write to whichever file is your
+portfolio — the matching `.csv` if it exists, otherwise the `.json`. For a CSV
+the new row goes at the end, in the file's own column order, and the file's
+line endings and encoding are kept, so a file saved from Excel or Numbers stays
+intact.
+
+They need the project's Python packages, so run them with the project's
+virtual environment, from the project folder:
+
+```bash
+./venv/bin/python3 add_international_holding.py AAPL 10 190.25 2026-03-14
+```
+
+(`add_holding.py SCOM 500 34.50` and `add_bond.py IFB1/2023/6.5 150000` work
+the same way; or run `source venv/bin/activate` first.) Running one with the
+system `python3` gives `ModuleNotFoundError: No module named 'dotenv'` — the
+script now prints the exact command to use instead.
+
+Two things to know:
+- **Close the CSV in your spreadsheet app first** (or reload it afterwards).
+  If it's open there, the app doesn't see the script's new row and will
+  overwrite it the next time you save.
+- If your CSV has no column for something you passed (say you deleted the
+  `buy_date` column), the script saves the purchase and tells you which value
+  it had nowhere to put.
+
 ## Already using the old JSON files?
 
 They keep working. The rule is one line:
@@ -204,24 +234,6 @@ warning saying the JSON is being ignored.
 `purchase_price_pct`, `purchase_date`, `note`). Run `./run.sh`, check your
 totals match what you had, then delete or rename the old `.json` file so there
 is no doubt which one counts.
-
-### The terminal helper scripts (JSON users only)
-
-`add_holding.py`, `add_international_holding.py` and `add_bond.py` append to
-the JSON files. They need the project's Python packages, so run them with the
-project's virtual environment from the project folder:
-
-```bash
-./venv/bin/python3 add_holding.py SCOM 500 34.50 2026-09-20
-./venv/bin/python3 add_international_holding.py AAPL 10 190.25 2026-03-14
-./venv/bin/python3 add_bond.py IFB1/2023/6.5 150000
-```
-
-(or `source venv/bin/activate` first). Running them with the system `python3`
-gives `ModuleNotFoundError: No module named 'dotenv'` — the script will now
-print the exact command to use instead. Once a CSV exists for that asset
-class the scripts refuse to run and tell you to edit the CSV, because writing
-to a JSON file that is being ignored would lose your entry.
 
 ## Tracking someone else's portfolio
 

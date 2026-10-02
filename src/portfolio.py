@@ -129,15 +129,24 @@ def load_holdings(portfolio_dir):
 
 def add_lot(portfolio_dir, symbol, quantity, buy_price, buy_date=None, note=""):
     """
-    Append one new lot to holdings.json (creating the file if needed).
-    Returns the updated full lot list. Used by add_holding.py.
+    Append one new lot and return the updated full lot list. Used by
+    add_holding.py.
 
-    Refuses (ValueError) if holdings.csv exists: that file is the portfolio
-    then, and appending to the JSON would write somewhere that's ignored.
+    Goes to whichever file is the portfolio: holdings.csv if it exists (the row
+    is added in the file's own column layout — see portfolio_csv.append_row),
+    otherwise holdings.json (created if needed). Writing to a JSON file that
+    a CSV is shadowing would silently lose the entry, so that never happens.
     """
     csv_path = os.path.join(portfolio_dir, HOLDINGS_CSV_FILE)
     if os.path.exists(csv_path):
-        raise ValueError(portfolio_csv.csv_in_use_message(csv_path, portfolio_csv.STOCK_LOT_FIELDS))
+        dropped = portfolio_csv.append_row(csv_path, portfolio_csv.STOCK_LOT_FIELDS, {
+            "symbol": symbol.strip().upper(), "quantity": float(quantity),
+            "buy_price": float(buy_price), "buy_date": buy_date, "note": note or "",
+        })
+        if dropped:
+            logger.warning(f"{HOLDINGS_CSV_FILE} has no column for {', '.join(dropped)}, so that "
+                           f"value was not saved — add the column to its header row to keep it.")
+        return load_holdings(portfolio_dir)
     path = _holdings_path(portfolio_dir)
     os.makedirs(portfolio_dir, exist_ok=True)
     data = {"holdings": []}

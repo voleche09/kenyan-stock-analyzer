@@ -259,12 +259,22 @@ def load_bonds(portfolio_dir):
 
 def add_bond(portfolio_dir, issue, face_value, purchase_price_pct=100.0,
             purchase_date=None, note=""):
-    """Append one bond holding to bonds.json (creating the file if needed).
-    Refuses (ValueError) if bonds.csv exists — that file is the portfolio
-    then, and appending to the JSON would be silently ignored."""
+    """Append one bond holding and return the updated full list. Goes to
+    bonds.csv if it exists (added in the file's own column layout), otherwise
+    bonds.json (created if needed) — never to a JSON file a CSV is shadowing."""
     csv_path = os.path.join(portfolio_dir, BONDS_CSV_FILE)
     if os.path.exists(csv_path):
-        raise ValueError(portfolio_csv.csv_in_use_message(csv_path, portfolio_csv.BOND_FIELDS))
+        dropped = portfolio_csv.append_row(csv_path, portfolio_csv.BOND_FIELDS, {
+            "issue": _canonical_issue(issue), "face_value": float(face_value),
+            "purchase_price_pct": float(purchase_price_pct),
+            "purchase_date": purchase_date, "note": note or "",
+        })
+        # Par is the default when the column is absent, so not saving it loses nothing.
+        dropped = [d for d in dropped if not (d == "purchase_price_pct" and float(purchase_price_pct) == 100.0)]
+        if dropped:
+            logger.warning(f"{BONDS_CSV_FILE} has no column for {', '.join(dropped)}, so that "
+                           f"value was not saved — add the column to its header row to keep it.")
+        return load_bonds(portfolio_dir)
     path = _bonds_path(portfolio_dir)
     os.makedirs(portfolio_dir, exist_ok=True)
     data = {"bonds": []}
