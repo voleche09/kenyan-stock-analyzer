@@ -8,8 +8,10 @@ sector analysis, email notifier, and config loading.
 
 import sys
 import os
+import json
 import unittest
 import tempfile
+from unittest import mock
 import pandas as pd
 import numpy as np
 
@@ -20,6 +22,10 @@ from logger import setup_logging, get_logger
 from utils import retry, safe_float, detect_support_resistance
 from analysis_engine import AnalysisEngine
 from sector_analysis import SectorAnalyzer
+import portfolio_csv
+import portfolio as portfolio_mod
+import international_portfolio
+import bonds_portfolio
 
 # Quiet logging during tests
 import logging
@@ -269,6 +275,221 @@ class TestEmailNotifier(unittest.TestCase):
         self.assertIn('NSE Daily Market Report', body)
 
 
+class TestPortfolioCsv(unittest.TestCase):
+    """CSV input for the private portfolio files — this parses money, so the
+    tricky spreadsheet-export cases (BOM, locale dates, decimal commas, broker
+    columns) are pinned down explicitly."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.dir = self._tmp.name
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def write(self, name, content):
+        """Write text (or raw bytes) into the temp portfolio dir; return its path."""
+        path = os.path.join(self.dir, name)
+        if isinstance(content, bytes):
+            with open(path, "wb") as f:
+                f.write(content)
+        else:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(content)
+        return path
+
+    # ---- parsing ----
+
+    def test_basic_stock_csv(self):
+        self.write("holdings.csv",
+                   "symbol,quantity,buy_price,buy_date,note\n"
+                   "scom , 1000,23.50,2026-03-14,first\n"
+                   "KCB,800,44,,\n")
+        self.assertEqual(portfolio_mod.load_holdings(self.dir), [
+            {"symbol": "SCOM", "quantity": 1000.0, "buy_price": 23.5,
+             "buy_date": "2026-03-14", "note": "first"},
+            {"symbol": "KCB", "quantity": 800.0, "buy_price": 44.0, "buy_date": None, "note": ""},
+        ])
+
+    def test_broker_style_headers_and_extra_columns(self):
+        # Header case/units/aliases are forgiven; Market Value and Unrealized P&L
+        # are ignored on purpose — only what you PAID is ever read.
+        self.write("international_holdings.csv",
+                   'Instrument,Position,Market Value,Avg Price (USD),Unrealized P&L\n'
+                   'AAPL,7,"1,500.25",190.25,+168.50\n'
+                   'F,100,364.00,10.50,-686.00\n')
+        lots = international_portfolio.load_holdings(self.dir)
+        self.assertEqual([(l["symbol"], l["quantity"], l["buy_price"]) for l in lots],
+                         [("AAPL", 7.0, 190.25), ("F", 100.0, 10.5)])
+
+    def test_excel_bom_and_crlf(self):
+        self.write("holdings.csv", b"\xef\xbb\xbfsymbol,quantity,buy_price\r\nSCOM,10,20\r\n\r\n")
+        lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual([(l["symbol"], l["quantity"], l["buy_price"]) for l in lots],
+                         [("SCOM", 10.0, 20.0)])
+
+    def test_currency_symbols_and_thousands_separators(self):
+        self.write("holdings.csv",
+                   'symbol,quantity,buy_price\n'
+                   'A,"1,000","$1,234.50"\n'
+                   'B,2,KES 99.5\n'
+                   'C,3,USD 10\n')
+        lots = {l["symbol"]: l for l in portfolio_mod.load_holdings(self.dir)}
+        self.assertEqual((lots["A"]["quantity"], lots["A"]["buy_price"]), (1000.0, 1234.5))
+        self.assertEqual(lots["B"]["buy_price"], 99.5)
+        self.assertEqual(lots["C"]["buy_price"], 10.0)
+
+    def test_decimal_comma_is_rejected_not_misread_as_thousands(self):
+        # "224,3" must never silently become 2243 — a 10x cost-basis error.
+        self.write("holdings.csv", 'symbol,quantity,buy_price\nA,1,"224,3"\nB,1,10\n')
+        with mock.patch.object(portfolio_csv.logger, "warning") as warn:
+            lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual([l["symbol"] for l in lots], ["B"])
+        self.assertTrue(warn.called)
+
+    def test_bare_price_header_is_not_accepted_as_cost(self):
+        # In a broker export "Price" is usually TODAY's price — using it as the
+        # cost basis would make every gain/loss zero.
+        path = self.write("holdings.csv", "symbol,quantity,price\nA,1,10\n")
+        with self.assertRaises(portfolio_csv.CsvFormatError) as ctx:
+            portfolio_csv.read_rows(path, portfolio_csv.STOCK_LOT_FIELDS)
+        self.assertIn("buy_price", str(ctx.exception))
+        self.assertEqual(portfolio_mod.load_holdings(self.dir), [])
+
+    def test_semicolon_separated_file_gets_clear_error(self):
+        path = self.write("holdings.csv", "symbol;quantity;buy_price\nA;1;2\n")
+        with self.assertRaises(portfolio_csv.CsvFormatError) as ctx:
+            portfolio_csv.read_rows(path, portfolio_csv.STOCK_LOT_FIELDS)
+        self.assertIn("semicolon", str(ctx.exception))
+
+    def test_unambiguous_dates_parse(self):
+        cases = {
+            "2026-09-20": "2026-09-20", "2026/09/20": "2026-09-20",
+            "20 Sep 2026": "2026-09-20", "Sep 20, 2026": "2026-09-20",
+            "20-Sep-26": "2026-09-20", "2026-09-20 00:00:00": "2026-09-20",
+            "20/09/2026": "2026-09-20",   # 20 can't be a month -> day-first
+            "09/20/2026": "2026-09-20",   # 20 can't be a month -> month-first
+            "05/05/2026": "2026-05-05",   # same either way
+        }
+        for raw, expected in cases.items():
+            self.assertEqual(portfolio_csv._parse_date(raw), expected, raw)
+
+    def test_ambiguous_or_invalid_dates_are_refused_not_guessed(self):
+        for raw in ("05/06/2026", "31/02/2026", "tomorrow", "45920"):
+            with self.assertRaises(ValueError, msg=raw):
+                portfolio_csv._parse_date(raw)
+
+    def test_bad_optional_date_keeps_the_lot(self):
+        self.write("holdings.csv", "symbol,quantity,buy_price,buy_date\nA,1,10,05/06/2026\n")
+        with mock.patch.object(portfolio_csv.logger, "warning") as warn:
+            lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual(len(lots), 1)
+        self.assertIsNone(lots[0]["buy_date"])
+        self.assertIn("ambiguous", warn.call_args[0][0])
+
+    def test_bad_rows_are_skipped_without_losing_the_rest(self):
+        self.write("holdings.csv",
+                   "symbol,quantity,buy_price\n"
+                   "OK,10,5\nZERO,0,5\nNEG,5,-1\n,5,5\nTXT,abc,5\nOK2,1.5,2\n")
+        lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual([l["symbol"] for l in lots], ["OK", "OK2"])
+        self.assertEqual(lots[1]["quantity"], 1.5)       # fractional shares are fine
+
+    def test_blank_and_trailing_empty_rows_are_ignored_quietly(self):
+        self.write("holdings.csv", "symbol,quantity,buy_price\nA,1,2\n,,\n\n   ,  ,\n")
+        with mock.patch.object(portfolio_csv.logger, "warning") as warn:
+            lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual(len(lots), 1)
+        self.assertFalse(warn.called)
+
+    def test_empty_file_and_header_only_are_empty_portfolios(self):
+        self.write("holdings.csv", "")
+        self.assertEqual(portfolio_mod.load_holdings(self.dir), [])
+        self.write("holdings.csv", "symbol,quantity,buy_price\n")
+        self.assertEqual(portfolio_mod.load_holdings(self.dir), [])
+
+    # ---- CSV vs JSON ----
+
+    def test_csv_wins_over_json_and_says_so(self):
+        self.write("holdings.json", json.dumps(
+            {"holdings": [{"symbol": "OLD", "quantity": 1, "buy_price": 1}]}))
+        self.write("holdings.csv", "symbol,quantity,buy_price\nNEW,2,3\n")
+        with mock.patch.object(portfolio_csv.logger, "warning") as warn:
+            lots = portfolio_mod.load_holdings(self.dir)
+        self.assertEqual([l["symbol"] for l in lots], ["NEW"])
+        self.assertIn("IGNORED", warn.call_args[0][0])
+
+    def test_json_still_works_when_there_is_no_csv(self):
+        self.write("holdings.json", json.dumps(
+            {"holdings": [{"symbol": "OLD", "quantity": 1, "buy_price": 2}]}))
+        self.assertEqual([l["symbol"] for l in portfolio_mod.load_holdings(self.dir)], ["OLD"])
+        self.assertEqual(portfolio_mod.load_holdings(os.path.join(self.dir, "nope")), [])
+
+    def test_csv_and_json_describing_the_same_portfolio_load_identically(self):
+        lots = [{"symbol": "SCOM", "quantity": 500, "buy_price": 34.5,
+                 "buy_date": "2026-09-20", "note": "n"},
+                {"symbol": "KCB", "quantity": 200, "buy_price": 92, "buy_date": None, "note": ""}]
+        a, b = os.path.join(self.dir, "a"), os.path.join(self.dir, "b")
+        os.makedirs(a)
+        os.makedirs(b)
+        with open(os.path.join(a, "holdings.json"), "w") as f:
+            json.dump({"holdings": lots}, f)
+        with open(os.path.join(b, "holdings.csv"), "w") as f:
+            f.write("symbol,quantity,buy_price,buy_date,note\n"
+                    "SCOM,500,34.5,2026-09-20,n\nKCB,200,92,,\n")
+        self.assertEqual(portfolio_mod.load_holdings(a), portfolio_mod.load_holdings(b))
+
+    def test_add_scripts_refuse_to_write_to_json_when_a_csv_is_the_portfolio(self):
+        cases = [("holdings.csv", portfolio_mod.add_lot, ("A", 1, 2)),
+                 ("international_holdings.csv", international_portfolio.add_lot, ("A", 1, 2)),
+                 ("bonds.csv", bonds_portfolio.add_bond, ("IFB1/2023/6.5", 100000))]
+        for csv_name, fn, args in cases:
+            path = self.write(csv_name, "header\n")
+            with self.assertRaises(ValueError, msg=csv_name) as ctx:
+                fn(self.dir, *args)
+            self.assertIn(csv_name, str(ctx.exception))
+            self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".json")], [])
+            os.remove(path)
+
+    def test_add_lot_still_creates_json_when_no_csv_exists(self):
+        portfolio_mod.add_lot(self.dir, "a", 3, 4.5, "2026-01-02", "x")
+        self.assertEqual(portfolio_mod.load_holdings(self.dir),
+                         [{"symbol": "A", "quantity": 3.0, "buy_price": 4.5,
+                           "buy_date": "2026-01-02", "note": "x"}])
+
+    # ---- bonds ----
+
+    def test_bonds_csv_aliases_defaults_and_downstream_compatibility(self):
+        self.write("bonds.csv",
+                   'Bond,Face Value,Purchase Price Pct,Purchase Date,Note\n'
+                   'FDX1/2022/025,"250,000",100,2022-09-23,typo alias\n'   # FDX -> FXD
+                   'IFB1/2023/6.5,150000,,,\n')                             # blank -> par
+        bonds = bonds_portfolio.load_bonds(self.dir)
+        self.assertEqual([b["issue"] for b in bonds], ["FXD1/2022/025", "IFB1/2023/6.5"])
+        self.assertEqual(bonds[0]["face_value"], 250000.0)
+        self.assertEqual(bonds[1]["purchase_price_pct"], 100.0)
+        self.assertIsNone(bonds[1]["purchase_date"])
+        summary = bonds_portfolio.compute_bond_portfolio(bonds)
+        self.assertEqual(summary["totals"]["n_available"], 2)
+
+    # ---- the shipped templates ----
+
+    def test_example_csv_templates_load_cleanly(self):
+        folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "portfolio")
+        with mock.patch.object(portfolio_csv.logger, "warning") as warn:
+            stocks = portfolio_csv.read_rows(os.path.join(folder, "holdings.example.csv"),
+                                             portfolio_csv.STOCK_LOT_FIELDS)
+            intl = portfolio_csv.read_rows(os.path.join(folder, "international_holdings.example.csv"),
+                                           portfolio_csv.STOCK_LOT_FIELDS)
+            bonds = portfolio_csv.read_rows(os.path.join(folder, "bonds.example.csv"),
+                                            portfolio_csv.BOND_FIELDS)
+        self.assertFalse(warn.called)
+        self.assertEqual((len(stocks), len(intl), len(bonds)), (3, 3, 2))
+        for _, row in bonds:   # every example bond must be one the dashboard has reference data for
+            self.assertIn(bonds_portfolio._canonical_issue(row["issue"]),
+                          bonds_portfolio.BOND_REFERENCE)
+
+
 def run_tests():
     """Run all tests and print results."""
     print("=" * 60)
@@ -285,6 +506,7 @@ def run_tests():
     suite.addTests(loader.loadTestsFromTestCase(TestSectorAnalysis))
     suite.addTests(loader.loadTestsFromTestCase(TestReportGenerator))
     suite.addTests(loader.loadTestsFromTestCase(TestEmailNotifier))
+    suite.addTests(loader.loadTestsFromTestCase(TestPortfolioCsv))
 
     # Run
     runner = unittest.TextTestRunner(verbosity=2)

@@ -1,0 +1,4 @@
+symbol,quantity,buy_price,buy_date,note
+SCOM,1000,23.50,2026-03-14,EXAMPLE lot - replace with your own purchases
+SCOM,500,26.00,2026-07-02,Each purchase is its own row - they combine automatically
+KCB,800,44.00,,buy_date is optional - leave it blank if you do not remember

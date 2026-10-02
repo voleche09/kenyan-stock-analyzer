@@ -222,7 +222,7 @@ def main():
             except Exception as e:
                 logger.warning(f"History snapshot skipped: {e}")
 
-        # ---- Personal portfolio (private — portfolio/holdings.json, gitignored) ----
+        # ---- Personal portfolio (private — portfolio/holdings.csv or holdings.json, gitignored) ----
         # Skipped entirely (empty-state page) if the user hasn't set up holdings.
         portfolio_summary = None
         portfolio_history_rows = []
@@ -250,7 +250,7 @@ def main():
         except Exception as e:
             logger.warning(f"Portfolio tracking skipped: {e}")
 
-        # ---- Personal bond portfolio (private — portfolio/bonds.json, gitignored) ----
+        # ---- Personal bond portfolio (private — portfolio/bonds.csv or bonds.json, gitignored) ----
         # Skipped entirely (empty-state section) if the user hasn't added bonds.
         # A bond's cash flows are fixed contractual facts, not live market data,
         # so this needs no network call — pure, fast local computation.
@@ -269,7 +269,7 @@ def main():
         except Exception as e:
             logger.warning(f"Bond tracking skipped: {e}")
 
-        # ---- International (US) stock portfolio (private — portfolio/international_holdings.json, gitignored) ----
+        # ---- International (US) stock portfolio (private — portfolio/international_holdings.csv or .json, gitignored) ----
         # Skipped entirely (empty-state section) if the user hasn't added holdings.
         # Uses Yahoo Finance (international_data.py) plus the SAME AnalysisEngine
         # and scoring.score_stock() already used for NSE stocks — no parallel

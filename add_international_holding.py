@@ -3,13 +3,17 @@
 Add an international (US-listed, USD) stock purchase to your private
 portfolio (portfolio/international_holdings.json).
 
+Prefer a spreadsheet? You don't need this script: put your holdings in
+portfolio/international_holdings.csv instead (see portfolio/README.md). Once
+that file exists it IS your portfolio, and this script will tell you to edit it.
+
 Usage:
     python3 add_international_holding.py SYMBOL QUANTITY BUY_PRICE_USD [BUY_DATE] [--note "text"]
 
 Examples:
-    python3 add_international_holding.py GOOG 7 264.06
-    python3 add_international_holding.py GOOG 7 264.06 2026-09-20
-    python3 add_international_holding.py UBER 15 74.88 --note "long-term hold"
+    python3 add_international_holding.py AAPL 10 190.25
+    python3 add_international_holding.py AAPL 10 190.25 2026-09-20
+    python3 add_international_holding.py MSFT 5 410.00 --note "long-term hold"
 
 Run this every time you buy more of a stock — even one you already hold.
 Each purchase is added as its own lot; the dashboard automatically combines
@@ -23,6 +27,9 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
+import venv_check
+venv_check.require_project_packages("portfolio/international_holdings.csv")
 
 from config import Config
 import international_portfolio as IP
@@ -75,7 +82,10 @@ def main():
             die(f"buy_date must be YYYY-MM-DD, got '{buy_date}'")
 
     config = Config()
-    lots = IP.add_lot(config.portfolio_dir, symbol, quantity, buy_price, buy_date, note)
+    try:
+        lots = IP.add_lot(config.portfolio_dir, symbol, quantity, buy_price, buy_date, note)
+    except ValueError as e:      # international_holdings.csv is in use, or the .json is corrupt
+        sys.exit(f"Error: {e}")
 
     print(f"✓ Added: {quantity:g} shares of {symbol} @ ${buy_price:g}"
           f"{f' on {buy_date}' if buy_date else ''}")

@@ -60,3 +60,10 @@ portfolio/bonds_history.json
 # Never committed. Only international_holdings.example.json and README.md are tracked.
 portfolio/international_holdings.json
 portfolio/international_history.json
+
+# Portfolio CSVs (holdings.csv, international_holdings.csv, bonds.csv) — the
+# spreadsheet-friendly way to enter your holdings. A catch-all on purpose: ANY
+# .csv dropped into portfolio/ (including a raw broker export you saved there)
+# is private by default. Only the *.example.csv templates are tracked.
+portfolio/*.csv
+!portfolio/*.example.csv

@@ -1,7 +1,7 @@
 """
 Personal BOND portfolio tracker — pure data + finance layer.
 
-Reads the user's PRIVATE bond holdings (portfolio/bonds.json, gitignored —
+Reads the user's PRIVATE bond holdings (portfolio/bonds.csv, or the older bonds.json, gitignored —
 never committed) and computes coupon schedules, accrued interest, cash-flow
 projections, tax treatment and yield/ROI for Kenya Government Treasury and
 Infrastructure Bonds.
@@ -55,10 +55,12 @@ import math
 import datetime as dt
 
 from logger import get_logger
+import portfolio_csv
 
 logger = get_logger(__name__)
 
 BONDS_FILE = "bonds.json"
+BONDS_CSV_FILE = "bonds.csv"
 BONDS_HISTORY_FILE = "bonds_history.json"
 
 SMALL_HOLDER_THRESHOLD = 1_000_000  # KES — CBK's "redeemed in full" cutoff, per CDS account
@@ -190,15 +192,45 @@ def _bonds_path(portfolio_dir):
     return os.path.join(portfolio_dir, BONDS_FILE)
 
 
+def _load_bonds_csv(path):
+    """bonds.csv -> bond lots (same shape as the JSON path)."""
+    name = os.path.basename(path)
+    try:
+        rows = portfolio_csv.read_rows(path, portfolio_csv.BOND_FIELDS)
+    except portfolio_csv.CsvFormatError as e:
+        logger.warning(f"Bonds: {e} — no bonds loaded from this file.")
+        return []
+    out = []
+    for line_no, r in rows:
+        issue, face = _canonical_issue(r["issue"]), r["face_value"]
+        if not issue or face <= 0:
+            logger.warning(f"Bonds: {name} line {line_no}: face_value must be above zero — "
+                           f"skipping this row")
+            continue
+        out.append({
+            "issue": issue,
+            "face_value": face,
+            # Blank -> par (100), same documented default as the JSON path.
+            "purchase_price_pct": r.get("purchase_price_pct") or 100.0,
+            "purchase_date": r.get("purchase_date"),
+            "note": r.get("note") or "",
+        })
+    logger.info(f"Bonds: loaded {len(out)} holding(s) from {name}")
+    return out
+
+
 def load_bonds(portfolio_dir):
     """
     Return the list of bond lots: [{issue, face_value, purchase_price_pct,
-    purchase_date, note}]. [] if the file doesn't exist yet or can't be
-    parsed — never raises.
+    purchase_date, note}]. Reads bonds.csv if it exists, otherwise bonds.json
+    (see portfolio_csv.pick_source). [] if neither exists yet or the file
+    can't be parsed — never raises.
     """
-    path = _bonds_path(portfolio_dir)
-    if not os.path.exists(path):
+    kind, path = portfolio_csv.pick_source(portfolio_dir, BONDS_CSV_FILE, BONDS_FILE)
+    if kind is None:
         return []
+    if kind == "csv":
+        return _load_bonds_csv(path)
     try:
         with open(path) as f:
             data = json.load(f)
@@ -227,7 +259,12 @@ def load_bonds(portfolio_dir):
 
 def add_bond(portfolio_dir, issue, face_value, purchase_price_pct=100.0,
             purchase_date=None, note=""):
-    """Append one bond holding to bonds.json (creating the file if needed)."""
+    """Append one bond holding to bonds.json (creating the file if needed).
+    Refuses (ValueError) if bonds.csv exists — that file is the portfolio
+    then, and appending to the JSON would be silently ignored."""
+    csv_path = os.path.join(portfolio_dir, BONDS_CSV_FILE)
+    if os.path.exists(csv_path):
+        raise ValueError(portfolio_csv.csv_in_use_message(csv_path, portfolio_csv.BOND_FIELDS))
     path = _bonds_path(portfolio_dir)
     os.makedirs(portfolio_dir, exist_ok=True)
     data = {"bonds": []}

@@ -14,6 +14,7 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **Similar stocks** — peer comparison by sector, market cap, and valuation
 - **Sector performance** — sector-by-sector breakdown with average returns
 - **Market breadth** — advance/decline, % above SMA50, bullish MACD ratio
+- **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds and US-listed stocks, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
 - **Excel export** — multi-sheet workbook with all data
 - **Clean runs** — old reports and cache files are automatically removed each run
 
@@ -74,6 +75,17 @@ open reports/index.html
 ```bash
 ./run.sh
 ```
+
+### Track your own portfolio (optional)
+
+Put your holdings in a spreadsheet and export it as CSV — no scripts to run:
+
+```bash
+cp portfolio/holdings.example.csv portfolio/holdings.csv   # then edit it in Excel / Numbers / Google Sheets
+./run.sh                                                    # the 💼 My Portfolio tab fills in
+```
+
+There are separate templates for US-listed stocks (`international_holdings.example.csv`, USD) and Kenya bonds (`bonds.example.csv`). Your real files are gitignored and kept out of Docker images automatically. Full guide — columns, accepted formats, saving from Excel/Numbers/Sheets, switching from the older JSON files: [`portfolio/README.md`](portfolio/README.md).
 
 ### Command-line options
 
@@ -244,9 +256,9 @@ To change the schedule, edit `.env` and restart: `docker compose up -d` (no rebu
 | `./data` | `/app/data` | Cached API responses, daily history log | Yes (until you delete it) |
 | `./reports` | `/app/reports` (rw in `generator`, ro in `web`) | The generated dashboard — what you actually browse | Yes |
 | `./logs` | `/app/logs` | `analyzer.log` — same file the bare-metal install writes | Yes |
-| `./portfolio` | `/app/portfolio` | **Your real stock and bond holdings, if you've set them up** | Yes — **and it must** |
+| `./portfolio` | `/app/portfolio` | **Your real holdings (stocks, bonds, international — `.csv` or `.json`), if you've set them up** | Yes — **and it must** |
 
-That last row is the one to actually pay attention to. `portfolio/holdings.json` and `portfolio/bonds.json` hold real money figures — what you own, what you paid. Three separate things keep them safe here:
+That last row is the one to actually pay attention to. Everything in `portfolio/` except the README and the `*.example.*` templates — your `holdings.csv`, `international_holdings.csv`, `bonds.csv` (or the older `.json` files) and the `*_history.json` snapshots — holds real money figures: what you own, what you paid. Three separate things keep them safe here:
 
 1. **`.dockerignore`** excludes them from the Docker *build context*, so they can never end up baked into an image layer — not even accidentally. An image is a distributable artifact; a bind-mounted folder is not. This project treats that distinction as a hard boundary, not a technicality.
 2. **`.gitignore`** already excludes them from git (unchanged from the bare-metal setup) — Docker doesn't touch this at all, it's the same protection either way.
@@ -260,7 +272,7 @@ That last row is the one to actually pay attention to. `portfolio/holdings.json`
 docker run --rm kenyan-stock-analyzer:latest sh -c "ls -la /app/portfolio"
 ```
 
-Should show only whatever was in the *build context* (nothing, on a fresh checkout, or just `holdings.example.json`/`README.md`/`bonds.example.json` if you've kept the repo's tracked files) — never `holdings.json`, `bonds.json`, or either `*_history.json`, even if those exist right next to the Dockerfile on your host. If you ever see them in that `ls` output, stop and open an issue — that would mean `.dockerignore` isn't being honored by your Docker version, which shouldn't happen but is worth knowing how to check for yourself rather than taking on faith.
+Should show only whatever was in the *build context* (nothing, on a fresh checkout, or just `README.md` and the `*.example.json` / `*.example.csv` templates if you've kept the repo's tracked files) — never a real `.csv` or `.json` holdings file or any `*_history.json`, even if those exist right next to the Dockerfile on your host. If you ever see them in that `ls` output, stop and open an issue — that would mean `.dockerignore` isn't being honored by your Docker version, which shouldn't happen but is worth knowing how to check for yourself rather than taking on faith.
 
 ### Permissions (a real gotcha)
 
@@ -304,9 +316,10 @@ docker compose exec generator python3 docker_scheduled_run.py --ignore-calendar
 # Check the configured schedule and confirm the container's timezone
 docker compose exec generator sh -c 'cat /app/.crontab; date'
 
-# Add a stock or bond purchase (identical to bare-metal — same script, same file)
-docker compose exec generator python3 add_holding.py SCOM 500 34.50
-docker compose exec generator python3 add_bond.py IFB1/2023/6.5 150000
+# Record a purchase: edit portfolio/holdings.csv (or international_holdings.csv / bonds.csv)
+# on the host — the folder is bind-mounted, so the next run picks it up. See portfolio/README.md.
+# (Only if you still use the older JSON files, the helper scripts work in the container too:
+#  docker compose exec generator python3 add_holding.py SCOM 500 34.50 )
 
 # Restart (e.g. after editing .env)
 docker compose up -d
@@ -350,6 +363,7 @@ kenyan_stock_analyzer/
 ├── send_summary.py             # Builds the 1-page PDF summary and emails it (daily job)
 ├── docker_scheduled_run.py     # Docker's scheduled job: market-closed check + full pipeline
 ├── run.sh                      # One-command runner, bare metal (venv + pipeline + open dashboard)
+├── add_holding.py / add_bond.py / add_international_holding.py   # Optional terminal helpers for the older JSON portfolio files
 ├── scheduler.py                # Optional scheduler for automated daily runs
 ├── .github/workflows/          # GitHub Actions — daily-summary.yml (scheduled email)
 ├── Dockerfile                  # Multi-stage image: Python app + supercronic scheduler
@@ -373,6 +387,10 @@ kenyan_stock_analyzer/
 │   ├── history_tracker.py      # Appends a daily snapshot for later accuracy review
 │   ├── report_generator.py     # HTML/PDF reports, Excel export, charts, summary PDF
 │   ├── sector_analysis.py      # Sector-level aggregation
+│   ├── portfolio.py            # Your NSE stock holdings: gain/loss, dividends, history (private)
+│   ├── international_portfolio.py  # Your US-listed holdings in USD, converted to KES (private)
+│   ├── bonds_portfolio.py      # Your Treasury/Infrastructure bonds: cash flows, accrued interest (private)
+│   ├── portfolio_csv.py        # Reads holdings.csv / international_holdings.csv / bonds.csv
 │   ├── config.py               # Centralized configuration from .env
 │   ├── logger.py               # Logging setup
 │   ├── utils.py                # Support/resistance detection, retry decorator
@@ -383,6 +401,7 @@ kenyan_stock_analyzer/
 │   ├── stock_report.html       # Individual stock report template
 │   └── market_summary.html     # Market summary template
 │
+├── portfolio/                  # YOUR private holdings (CSV/JSON, gitignored) + the tracked example templates + guide
 ├── reports/                    # Generated reports (cleaned each run)
 ├── data/                       # Cached data files (cleaned each run)
 └── logs/                       # Application logs
@@ -468,6 +487,16 @@ sudo apt-get install -y \
 Running via **Docker** installs all of this automatically inside the image — see below.
 
 ## Troubleshooting
+
+### `ModuleNotFoundError: No module named 'dotenv'` (or `pandas`, `yfinance`, …)
+
+You ran a script with your system `python3` instead of the project's virtual environment, where the packages are installed. `./run.sh` activates it for you; for anything else, use the environment's Python from the project folder:
+
+```bash
+./venv/bin/python3 add_holding.py SCOM 500 34.50     # or:  source venv/bin/activate  first
+```
+
+(The `add_*.py` helpers now print this exact fix if you forget. If there's no `venv/` folder yet, create it once with the three commands under *Quick Start → Set up*.) Entering holdings in a CSV instead avoids scripts entirely — see [`portfolio/README.md`](portfolio/README.md).
 
 ### WeasyPrint (PDF) not working on macOS
 ```bash

@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """
 Add a Treasury/Infrastructure bond holding to your private portfolio
-(portfolio/bonds.json).
+(portfolio/bonds.json). Prefer a spreadsheet? You don't need this script:
+put your bonds in portfolio/bonds.csv instead (see portfolio/README.md) —
+once that file exists it IS your portfolio, and this script will tell you
+to edit it.
 
 Usage:
     python3 add_bond.py ISSUE FACE_VALUE [PURCHASE_PRICE_PCT] [PURCHASE_DATE] [--note "text"]
@@ -30,6 +33,9 @@ import sys
 from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
+
+import venv_check
+venv_check.require_project_packages("portfolio/bonds.csv")
 
 from config import Config
 import bonds_portfolio as B
@@ -83,7 +89,10 @@ def main():
             die(f"purchase_date must be YYYY-MM-DD, got '{purchase_date}'")
 
     config = Config()
-    bonds = B.add_bond(config.portfolio_dir, issue, face_value, price_pct, purchase_date, note)
+    try:
+        bonds = B.add_bond(config.portfolio_dir, issue, face_value, price_pct, purchase_date, note)
+    except ValueError as e:      # bonds.csv is in use, or bonds.json is corrupt
+        sys.exit(f"Error: {e}")
 
     print(f"✓ Added: KES {face_value:,.0f} face value of {issue}"
           f"{f' @ {price_pct:g}% of face' if price_pct != 100.0 else ' (at par)'}"
