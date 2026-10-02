@@ -95,8 +95,9 @@ def enforce_daily_cache(data_dir, reports_dir=None):
     if is_new_day:
         removed = 0
         for name in os.listdir(data_dir):
-            if name in ("history", CACHE_MARKER):
-                continue  # preserve the long-term log and the marker
+            if name in ("history", "logos", CACHE_MARKER):
+                continue  # preserve the long-term log, cached ticker logos (they
+                          # don't change day to day), and the marker
             path = os.path.join(data_dir, name)
             if os.path.isfile(path):
                 try:

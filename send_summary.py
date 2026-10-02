@@ -68,7 +68,8 @@ def main():
     # dashboard in the same reports folder (matters only on a shared machine;
     # on the GitHub runner the folder is already cleared each run).
     report_gen = ReportGenerator(template_dir=config.template_dir,
-                                 output_dir=config.report_directory, clean_old=False)
+                                 output_dir=config.report_directory, clean_old=False,
+                                 cache_dir=config.cache_dir)
 
     # ---- Data + analysis ----
     logger.info("Fetching stock data...")

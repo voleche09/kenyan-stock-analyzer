@@ -126,6 +126,7 @@ def fetch_fundamentals(symbol):
             'sector': info.get('sector'),
             'industry': info.get('industry'),
             'currency': info.get('currency') or 'USD',
+            'website': info.get('website'),  # used to derive a domain for the ticker logo
             'market_cap': info.get('marketCap'),
             'price': price,
             'beta': info.get('beta'),
