@@ -1,0 +1,5 @@
+symbol,market,buy_below,sell_above,note,added,added_price
+EQTY,NSE,40,60,Example - waiting for the half-year results,2026-09-01,45.10
+EABL,NSE,,,Example - no targets yet,2026-09-15,
+AAPL,INTL,180,260,Example - buy on a dip,2026-09-01,
+MSFT,INTL,,,,,

@@ -252,6 +252,7 @@ class FundamentalAnalysis:
 
         # Extra columns not in COMPREHENSIVE_FULL that we surface in reports.
         extra_columns = [
+            'description',  # the company's full name, e.g. "Equity Group Holdings Limited"
             'dividend_ex_date_upcoming', 'dividend_ex_date_recent',
             'earnings_release_next_date', 'earnings_release_date',
             'price_52_week_high', 'price_52_week_low', 'book_value_per_share_fq',
@@ -282,6 +283,9 @@ class FundamentalAnalysis:
                     # Extract all fundamental metrics
                     d = stock.model_extra  # extra fields not in base model
                     fundamentals = {
+                        # === Identity ===
+                        "name": getattr(stock, 'description', None) or d.get('description'),
+
                         # === Valuation ===
                         "market_cap": getattr(stock, 'market_cap_basic', None),
                         "pe_ratio": getattr(stock, 'price_earnings_ttm', None),
@@ -555,11 +559,15 @@ class FundamentalAnalysis:
         return {}
 
     def _save_to_cache(self, date_str: str, data: dict):
-        """Save fundamental data to JSON cache."""
+        """Save fundamental data to JSON cache — atomically (temp file +
+        replace), because the dashboard app and a pipeline run can both be
+        writing today's file at the same moment."""
         path = self._cache_path(date_str)
+        tmp = f"{path}.{os.getpid()}.tmp"
         try:
-            with open(path, 'w') as f:
+            with open(tmp, 'w') as f:
                 json.dump(data, f, indent=2, default=str)
+            os.replace(tmp, path)
             logger.debug(f"Cached fundamentals to {path}")
         except Exception as e:
             logger.debug(f"Cache write error: {e}")

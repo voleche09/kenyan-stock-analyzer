@@ -125,10 +125,13 @@ def load_holdings(portfolio_dir):
 
 def add_lot(portfolio_dir, symbol, quantity, buy_price, buy_date=None, note=""):
     """Append one new lot and return the updated full lot list. Used by
-    add_international_holding.py. Goes to international_holdings.csv if it
-    exists (added in the file's own column layout), otherwise the .json
-    (created if needed) — never to a JSON file a CSV is shadowing."""
+    add_international_holding.py and the dashboard app. Goes to
+    international_holdings.csv if it exists (added in the file's own column
+    layout), otherwise an existing .json; with no file at all yet, the CSV is
+    started — never to a JSON file a CSV is shadowing."""
     csv_path = os.path.join(portfolio_dir, HOLDINGS_CSV_FILE)
+    if not os.path.exists(csv_path) and not os.path.exists(_holdings_path(portfolio_dir)):
+        portfolio_csv.create_csv(csv_path, portfolio_csv.STOCK_LOT_FIELDS)
     if os.path.exists(csv_path):
         dropped = portfolio_csv.append_row(csv_path, portfolio_csv.STOCK_LOT_FIELDS, {
             "symbol": symbol.strip().upper(), "quantity": float(quantity),

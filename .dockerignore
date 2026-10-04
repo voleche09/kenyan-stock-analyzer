@@ -22,10 +22,13 @@ portfolio/history.json
 portfolio/bonds_history.json
 portfolio/international_holdings.json
 portfolio/international_history.json
-# Portfolio CSVs — catch-all so any .csv in portfolio/ stays out of the image;
-# only the fake-data *.example.csv templates are allowed through.
+# Portfolio CSVs (holdings, bonds, international, watchlist) — catch-all so any
+# .csv in portfolio/ stays out of the image; only the fake-data *.example.csv
+# templates are allowed through.
 portfolio/*.csv
 !portfolio/*.example.csv
+# Safety copies the dashboard app takes before removing/editing a row — same private data.
+portfolio/backups/
 
 # ---- Local Python environment ----
 venv/

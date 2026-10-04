@@ -61,9 +61,14 @@ portfolio/bonds_history.json
 portfolio/international_holdings.json
 portfolio/international_history.json
 
-# Portfolio CSVs (holdings.csv, international_holdings.csv, bonds.csv) — the
-# spreadsheet-friendly way to enter your holdings. A catch-all on purpose: ANY
-# .csv dropped into portfolio/ (including a raw broker export you saved there)
-# is private by default. Only the *.example.csv templates are tracked.
+# Portfolio CSVs (holdings.csv, international_holdings.csv, bonds.csv,
+# watchlist.csv) — the spreadsheet-friendly way to enter your holdings and the
+# stocks you're watching. A catch-all on purpose: ANY .csv dropped into
+# portfolio/ (including a raw broker export you saved there) is private by
+# default. Only the *.example.csv templates are tracked.
 portfolio/*.csv
 !portfolio/*.example.csv
+
+# Automatic safety copies the dashboard app takes before it removes or edits a
+# row in one of your portfolio files — the same private data, so never committed.
+portfolio/backups/

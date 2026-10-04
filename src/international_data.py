@@ -25,6 +25,7 @@ assumed from docs, which are inconsistent/stale across yfinance versions):
 """
 
 import os
+import json
 import hashlib
 import datetime as dt
 
@@ -87,7 +88,7 @@ def fetch_history(symbol, period="6mo", interval="1d", cache_dir="data", force_r
 # Fundamentals — shaped to be directly usable by scoring.score_stock() (which
 # is currency-agnostic already), plus extra display-only fields.
 # ----------------------------------------------------------------------------
-def fetch_fundamentals(symbol):
+def fetch_fundamentals(symbol, cache_dir=None, force_refresh=False):
     """
     Return a fundamentals dict for a US ticker, or {} on failure. Keys
     matching scoring.py's expectations (pe_ratio, price_to_book, peg_ratio,
@@ -97,14 +98,58 @@ def fetch_fundamentals(symbol):
     An ETF legitimately has most fundamental fields as None —
     that's real, not a bug; the dashboard shows it as "no data" rather than
     guessing, same as everywhere else in this codebase.
-    """
-    try:
-        import yfinance as yf
-        info = yf.Ticker(symbol).info
-        if not info or len(info) < 3:
-            logger.warning(f"  No Yahoo Finance fundamentals for {symbol}")
-            return {}
 
+    cache_dir: if given, today's result is cached there as JSON (intl_fund_*,
+    swept by the daily cache wipe like every other cache file) so repeat runs
+    on the same day — e.g. the watchlist page refreshing after you add a
+    stock — don't re-download it. force_refresh skips reading that cache (a
+    fresh copy is still saved).
+    """
+    if cache_dir and not force_refresh:
+        cached = _load_json_cache(_fund_cache_path(symbol, cache_dir))
+        if cached:
+            return cached
+    try:
+        info = fetch_info(symbol)
+    except Exception as e:
+        logger.warning(f"  Yahoo Finance fundamentals error for {symbol}: {e}")
+        return {}
+    if not info or len(info) < 3:
+        logger.warning(f"  No Yahoo Finance fundamentals for {symbol}")
+        return {}
+    fund = fundamentals_from_info(symbol, info)
+    if cache_dir and fund:
+        _save_json_cache(_fund_cache_path(symbol, cache_dir), fund)
+    return fund
+
+
+def fetch_info(symbol):
+    """Raw yfinance .info for a ticker. Unlike the fetch_* helpers this RAISES on
+    network/HTTP errors, so a caller can tell 'Yahoo is unreachable' apart from
+    'no such ticker' (an empty / near-empty dict)."""
+    import yfinance as yf
+    return yf.Ticker(symbol).info
+
+
+def _next_earnings_date(info):
+    """The next (today or later) earnings date Yahoo reports, as YYYY-MM-DD."""
+    today = dt.date.today()
+    for key in ('earningsTimestampStart', 'earningsTimestamp', 'earningsTimestampEnd'):
+        ts = info.get(key)
+        if not ts:
+            continue
+        try:
+            d = dt.datetime.fromtimestamp(float(ts)).date()
+        except (TypeError, ValueError, OSError):
+            continue
+        if d >= today:
+            return d.isoformat()
+    return None
+
+
+def fundamentals_from_info(symbol, info):
+    """Map a raw yfinance .info dict to this project's fundamentals shape (see fetch_fundamentals)."""
+    try:
         price = info.get('currentPrice') or info.get('regularMarketPrice')
         roe = info.get('returnOnEquity')
         net_margin = info.get('profitMargins')
@@ -118,6 +163,7 @@ def fetch_fundamentals(symbol):
         held_insiders = info.get('heldPercentInsiders')
         held_institutions = info.get('heldPercentInstitutions')
         ex_div_ts = info.get('exDividendDate')
+        week52_change = info.get('52WeekChange')
 
         return {
             # ---- display ----
@@ -125,8 +171,16 @@ def fetch_fundamentals(symbol):
             'quote_type': info.get('quoteType'),  # 'EQUITY' or 'ETF'
             'sector': info.get('sector'),
             'industry': info.get('industry'),
+            # Yahoo quotes London/Johannesburg prices in the MINOR unit
+            # ('GBp' = pence, 'ZAc' = cents) — kept exactly as reported.
             'currency': info.get('currency') or 'USD',
+            'financial_currency': info.get('financialCurrency'),
+            'exchange_name': info.get('fullExchangeName') or info.get('exchange'),
             'website': info.get('website'),  # used to derive a domain for the ticker logo
+            'week52_change_pct': week52_change * 100 if week52_change is not None else None,
+            'fifty_day_avg': info.get('fiftyDayAverage'),
+            'two_hundred_day_avg': info.get('twoHundredDayAverage'),
+            'next_earnings_date': _next_earnings_date(info),
             'market_cap': info.get('marketCap'),
             'price': price,
             'beta': info.get('beta'),
@@ -148,7 +202,7 @@ def fetch_fundamentals(symbol):
             # ---- scoring.py-compatible keys (verified unit conversions — see module docstring) ----
             'pe_ratio': info.get('trailingPE'),
             'forward_pe': info.get('forwardPE'),
-            'peg_ratio': info.get('pegRatio'),
+            'peg_ratio': info.get('pegRatio') or info.get('trailingPegRatio'),
             'price_to_book': info.get('priceToBook'),
             'price_to_sales': info.get('priceToSalesTrailing12Months'),
             'roe': roe * 100 if roe is not None else None,
@@ -369,6 +423,43 @@ def _load_from_cache(symbol, cache_dir):
     except Exception as e:
         logger.debug(f"  Intl cache read error: {e}")
     return None
+
+
+# JSON caches (fundamentals for the day; news for an hour) — same day-scoped
+# naming, so the daily cache wipe sweeps them like everything else.
+def _fund_cache_path(symbol, cache_dir):
+    return os.path.join(cache_dir, f"{CACHE_PREFIX}fund_{_cache_key(symbol)[len(CACHE_PREFIX):]}.json")
+
+
+def _load_json_cache(path, max_age_seconds=None):
+    """Return the cached JSON value if the file is from today (and, when
+    max_age_seconds is given, younger than that); else None."""
+    try:
+        if not os.path.exists(path):
+            return None
+        mtime = dt.datetime.fromtimestamp(os.path.getmtime(path))
+        if mtime.date() != dt.datetime.now().date():
+            return None
+        if max_age_seconds is not None and (dt.datetime.now() - mtime).total_seconds() > max_age_seconds:
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.debug(f"  Cache read error ({os.path.basename(path)}): {e}")
+        return None
+
+
+def _save_json_cache(path, value):
+    """Write atomically (temp + replace): the dashboard app and the pipeline can
+    both be writing caches at the same time."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(value, f, default=str)
+        os.replace(tmp, path)
+    except Exception as e:
+        logger.debug(f"  Cache write error ({os.path.basename(path)}): {e}")
 
 
 # ---- Smoke test ----

@@ -66,7 +66,11 @@ def main():
     parser.add_argument('--detailed', action='store_true',
                         help='Generate individual stock reports (slower)')
     parser.add_argument('--watchlist-only', action='store_true',
-                        help='Only analyze configured watchlist, not all stocks')
+                        help='Only analyze STOCK_SYMBOLS plus the NSE stocks on your '
+                             'watchlist (portfolio/watchlist.csv), not all stocks')
+    parser.add_argument('--watchlist-page-only', action='store_true',
+                        help='Only rebuild the ⭐ Watchlist page (fast; leaves every other '
+                             'page as it is) — what the dashboard app runs after you add a stock')
     args = parser.parse_args()
 
     analysis_date = datetime.now()
@@ -76,6 +80,22 @@ def main():
         except ValueError:
             logger.error("Invalid date format. Use YYYY-MM-DD")
             sys.exit(1)
+
+    if args.watchlist_page_only:
+        # Fast path: rebuild just reports/watchlist.html from today's caches.
+        # Deliberately skips enforce_daily_cache() — that empties reports/,
+        # which would take every other dashboard page down with it. The data
+        # caches are date-stamped, so nothing stale is reused anyway.
+        logger.info("Rebuilding the watchlist page only...")
+        try:
+            from watchlist_report import refresh_watchlist_page
+            info = refresh_watchlist_page(config, period=args.period, interval=args.interval,
+                                          force_refresh=args.force_refresh)
+        except Exception as e:
+            logger.error(f"Watchlist page failed: {e}", exc_info=True)
+            sys.exit(1)
+        print(f"Watchlist page ready: {os.path.abspath(info['path'])} ({info['count']} stock(s))")
+        return
 
     logger.info("=" * 60)
     logger.info(f"KENYAN STOCK ANALYZER — {analysis_date.strftime('%Y-%m-%d')}")
@@ -107,7 +127,14 @@ def main():
         # ---- Fetch data ----
         logger.info("Fetching stock data from NSE...")
         if args.watchlist_only:
-            symbols = config.stock_symbols
+            symbols = list(config.stock_symbols)
+            try:
+                import watchlist as watchlist_mod
+                for entry in watchlist_mod.load_watchlist(config.portfolio_dir):
+                    if entry['market'] == watchlist_mod.MARKET_NSE and entry['symbol'] not in symbols:
+                        symbols.append(entry['symbol'])
+            except Exception as e:
+                logger.warning(f"Couldn't read the watchlist: {e}")
             stock_data = data_acq.fetch_multiple_stocks(
                 symbols, period=args.period, interval=args.interval,
                 force_refresh=args.force_refresh,
@@ -228,6 +255,7 @@ def main():
         portfolio_history_rows = []
         portfolio_news = []
         portfolio_history_tracker = None
+        lots = []
         try:
             import portfolio as portfolio_mod
             lots = portfolio_mod.load_holdings(config.portfolio_dir)
@@ -278,6 +306,11 @@ def main():
         intl_portfolio_history_rows = []
         intl_portfolio_news = []
         intl_portfolio_history_tracker = None
+        intl_lots = []
+        intl_symbols = []
+        intl_analysis_results = {}
+        intl_fundamentals_data = {}
+        intl_scores = {}
         try:
             import international_portfolio as intl_mod
             import international_data as intl_data
@@ -287,8 +320,6 @@ def main():
                 intl_symbols = sorted({l['symbol'] for l in intl_lots})
                 logger.info(f"International portfolio: {len(intl_lots)} lot(s) across "
                            f"{len(intl_symbols)} holding(s)")
-                intl_analysis_results = {}
-                intl_fundamentals_data = {}
                 for sym in intl_symbols:
                     hist = intl_data.fetch_history(
                         sym, period=args.period, interval=args.interval,
@@ -296,9 +327,9 @@ def main():
                     )
                     if hist is not None:
                         intl_analysis_results[sym] = analysis_engine.analyze_stock(hist)
-                    intl_fundamentals_data[sym] = intl_data.fetch_fundamentals(sym)
+                    intl_fundamentals_data[sym] = intl_data.fetch_fundamentals(
+                        sym, cache_dir=config.cache_dir, force_refresh=args.force_refresh)
 
-                intl_scores = {}
                 if config.enable_scoring:
                     try:
                         from scoring import score_stock
@@ -417,6 +448,33 @@ def main():
             intl_portfolio_history_tracker=intl_portfolio_history_tracker,
             intl_report_files=intl_report_files,
         )
+
+        # ---- ⭐ Watchlist page (private — portfolio/watchlist.csv, gitignored) ----
+        # Always written (an empty-state page if there's no watchlist yet) so
+        # the nav link never leads nowhere. Reuses everything fetched above.
+        try:
+            from watchlist_report import generate_watchlist_page
+            generate_watchlist_page(
+                config, report_gen, analysis_engine,
+                preloaded={
+                    'nse_results': analysis_results, 'fundamentals': fundamentals_data,
+                    'validations': validations, 'scores': scores,
+                    'sector_medians': sector_medians, 'usd_kes': usd_kes,
+                    'report_files': report_files,
+                    'intl_results': intl_analysis_results, 'intl_fundamentals': intl_fundamentals_data,
+                    'intl_scores': intl_scores, 'intl_report_files': intl_report_files,
+                    'nse_lots': lots, 'intl_lots': intl_lots,
+                    'data_acq': data_acq, 'fund_analyzer': fund_analyzer,
+                },
+                period=args.period, interval=args.interval, force_refresh=args.force_refresh,
+            )
+        except Exception as e:
+            logger.warning(f"Watchlist page skipped: {e}", exc_info=True)
+            try:
+                from watchlist_report import write_error_page
+                write_error_page(report_gen, str(e))
+            except Exception:
+                pass
 
         # ---- Email ----
         if not args.no_email and config.enable_email_notifications:

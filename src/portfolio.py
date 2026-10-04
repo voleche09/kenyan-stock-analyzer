@@ -134,10 +134,14 @@ def add_lot(portfolio_dir, symbol, quantity, buy_price, buy_date=None, note=""):
 
     Goes to whichever file is the portfolio: holdings.csv if it exists (the row
     is added in the file's own column layout — see portfolio_csv.append_row),
-    otherwise holdings.json (created if needed). Writing to a JSON file that
-    a CSV is shadowing would silently lose the entry, so that never happens.
+    otherwise an existing holdings.json. If there's no portfolio file at all
+    yet, holdings.csv is started (the spreadsheet-friendly format). Writing to
+    a JSON file that a CSV is shadowing would silently lose the entry, so that
+    never happens.
     """
     csv_path = os.path.join(portfolio_dir, HOLDINGS_CSV_FILE)
+    if not os.path.exists(csv_path) and not os.path.exists(_holdings_path(portfolio_dir)):
+        portfolio_csv.create_csv(csv_path, portfolio_csv.STOCK_LOT_FIELDS)
     if os.path.exists(csv_path):
         dropped = portfolio_csv.append_row(csv_path, portfolio_csv.STOCK_LOT_FIELDS, {
             "symbol": symbol.strip().upper(), "quantity": float(quantity),
@@ -477,13 +481,17 @@ def _parse_pubdate(published_utc):
     return None
 
 
-def fetch_portfolio_news(symbols, max_items_per_symbol=4, max_age_days=7):
+def fetch_portfolio_news(symbols, max_items_per_symbol=4, max_age_days=7, names=None):
     """
     Return [{symbol, title, url, source, published_utc}], newest first,
     limited to headlines published within the last `max_age_days` days.
     Deliberately NOT sentiment-tagged — see module docstring. Fails safe to
     [] if the news source is unreachable. A headline whose date can't be
     parsed is dropped rather than assumed recent.
+
+    names: optional {symbol: company name} for stocks SYMBOL_NAMES doesn't
+    cover (the curated short names there still win — they match far more
+    headlines than a formal "... Holdings Limited").
     """
     if not symbols:
         return []
@@ -502,7 +510,7 @@ def fetch_portfolio_news(symbols, max_items_per_symbol=4, max_age_days=7):
     cutoff = dt.datetime.utcnow() - dt.timedelta(days=max_age_days)
     out = []
     for sym in symbols:
-        name = SYMBOL_NAMES.get(sym, f"{sym} NSE Kenya")
+        name = SYMBOL_NAMES.get(sym) or (names or {}).get(sym) or f"{sym} NSE Kenya"
         query = f'"{name}" Kenya'
         try:
             url = f"https://news.google.com/rss/search?q={requests.utils.quote(query)}&hl=en-KE&gl=KE&ceid=KE:en"

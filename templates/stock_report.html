@@ -4,7 +4,7 @@
 {% block content %}
 <!-- Header -->
 <div class="header">
-    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}</h1>
+    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.sector %}— {{ fundamentals.sector }}{% endif %}<button type="button" class="wl-star app-only" data-symbol="{{ symbol }}" data-market="NSE" data-name="{{ fundamentals.name or symbol }}">☆ Watch</button></h1>
     <div class="meta">
         Generated at {{ generated_at }} |
         Market Cap: {{ fmt_mcap(fundamentals.market_cap) }} |
@@ -21,6 +21,7 @@
 <div class="nav-bar">
     <a href="index.html" class="nav-item">🏠 Overview</a>
     <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="watchlist.html" class="nav-item">⭐ Watchlist</a>
     <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
     <a href="technicals.html" class="nav-item">📈 Technicals</a>
     <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
@@ -678,6 +679,7 @@
 <div class="nav-bar bottom-nav">
     <a href="index.html" class="nav-item">🏠 Overview</a>
     <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="watchlist.html" class="nav-item">⭐ Watchlist</a>
     <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
     <a href="technicals.html" class="nav-item">📈 Technicals</a>
     <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
