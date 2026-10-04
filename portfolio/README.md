@@ -1,14 +1,43 @@
 # My Portfolio — private, never committed
 
 This folder holds **your real stock, bond and international-stock
-holdings**. It is deliberately kept out of git: every real file in here
-(`*.csv` other than the `*.example.csv` templates, plus `holdings.json`,
-`history.json`, `bonds.json`, `bonds_history.json`,
-`international_holdings.json` and `international_history.json`) is listed in
-`.gitignore` — and in `.dockerignore`, for the Docker install — so it will
-never be committed, pushed, baked into a Docker image, or visible to anyone
-you share this repo with, including in commit history, pull requests, or
-merge diffs. Only this README and the `*.example.*` templates are tracked.
+holdings, and your ⭐ watchlist**. It is deliberately kept out of git: every
+real file in here (`*.csv` other than the `*.example.csv` templates — so
+`holdings.csv`, `international_holdings.csv`, `bonds.csv`, `watchlist.csv` —
+plus `holdings.json`, `history.json`, `bonds.json`, `bonds_history.json`,
+`international_holdings.json`, `international_history.json` and the
+`backups/` folder) is listed in `.gitignore` — and in `.dockerignore`, for the
+Docker install — so it will never be committed, pushed, baked into a Docker
+image, or visible to anyone you share this repo with, including in commit
+history, pull requests, or merge diffs. Only this README and the
+`*.example.*` templates are tracked.
+
+## The easiest way — the dashboard app (nothing to edit by hand)
+
+Double-click **`Open Dashboard.command`** in the project folder (or run
+`./venv/bin/python3 app.py`). The dashboard opens in your browser, and:
+
+- **💼 My Portfolio → ➕ Record a purchase** — pick *Kenyan stock*,
+  *International stock (US$)* or *Government bond*, search for it by name or
+  ticker, type the number of shares and the price you paid **per share**, and
+  click **Review → Save**. It checks the ticker exists, warns about likely
+  typos (a price far from today's, a future date, part-shares on the NSE), and
+  writes the row into the right file below — creating it with the proper
+  header if it doesn't exist yet.
+- **📝 Your entries** (bottom of the same page) — every row of your files,
+  with **Remove** (and **Undo**). A copy of the file is saved in `backups/`
+  first (the newest 20 per file are kept).
+- **⭐ Watchlist → ➕ Add a stock** — search, pick, optionally set your buy /
+  sell prices, **Add**. Edit or remove from each stock's card.
+
+The portfolio pages update by themselves a couple of minutes after a change
+(the watchlist in seconds). Everything below still works too — the app writes
+the same files you can open in a spreadsheet.
+
+> **One rule if you do both:** if one of these files is open in Excel,
+> Numbers or Sheets while you add something in the app, close the
+> spreadsheet **without saving** (or reload it) — otherwise saving there
+> overwrites the row the app just added.
 
 ## Quick start — enter your holdings in a spreadsheet (CSV)
 
@@ -49,14 +78,16 @@ That's the whole workflow. To record a new purchase later: add a row, save,
 re-run — or let a helper script add the row for you
 ([see below](#prefer-the-terminal-helper-scripts)).
 
-## The three files
+## The files
 
 | File (you create it) | Tracked in git? | What it holds | Money columns are in |
 |---|---|---|---|
 | `holdings.csv` | **No — private** | NSE stock purchases | KES |
 | `international_holdings.csv` | **No — private** | US-listed stock purchases | **USD** |
 | `bonds.csv` | **No — private** | Kenya Treasury / Infrastructure bond purchases | KES |
-| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv` | Yes | Fake-data templates to copy from | — |
+| `watchlist.csv` | **No — private** | ⭐ Stocks you're watching (NSE or international) and your buy/sell prices | the stock's own currency |
+| `backups/` | **No — private** | Copies the dashboard app takes before it removes or edits a row | — |
+| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv` | Yes | Fake-data templates to copy from | — |
 
 Each is a separate file because each asset class has its own currency and its
 own meaning for "price" — so a US stock priced in dollars can never be mixed
@@ -112,6 +143,28 @@ A bond's whole future cash-flow schedule (every coupon date and amount, and
 when principal comes back) is fixed and knowable in advance, so all you enter
 is what you hold; accrued interest, next payment, the cash-flow calendar,
 after-tax income and running yield are all computed for you.
+
+### Watchlist — `watchlist.csv`
+
+| Column | Required? | What to put |
+|---|---|---|
+| `symbol` | **Yes** | The ticker: an NSE code (`EQTY`, `EABL`) or any Yahoo Finance ticker (`AAPL`, `BRK-B`, `VOD.L` for London, `NPN.JO` for Johannesburg). Index (`^…`) and futures (`…=F`) tickers aren't stocks and are refused. |
+| `market` | No | `NSE` or `INTL` (also understood: `Kenya`, `US`, `International`, `NASDAQ`, `LSE`, …). **Blank = NSE if it's an NSE ticker, otherwise international.** Fill it in when a ticker exists in both places — `EQTY` is Equity Group on the NSE but an unrelated ETF in New York. |
+| `buy_below` | No | Your "I'd consider buying at or under this" price, in the stock's own currency (KES, USD, or e.g. pence — `GBp` — for London). |
+| `sell_above` | No | Your "I'd consider selling / taking profit at or over this" price. Must be above `buy_below`. |
+| `note` | No | Why you're watching it. |
+| `added` | No | The date you started watching (the app fills this in). |
+| `added_price` | No | The price that day (the app fills this in) — used for "since you started watching". |
+
+```csv
+symbol,market,buy_below,sell_above,note,added,added_price
+EQTY,NSE,40,60,waiting for the half-year results,2026-09-01,45.10
+AAPL,INTL,180,260,buy on a dip,,
+```
+
+A ticker listed twice uses its first row (with a warning). A row with a ticker
+that has no data — a typo, say — still shows a card saying so, so you can
+spot and fix it.
 
 ## What the reader accepts (and what it deliberately refuses)
 
@@ -185,17 +238,27 @@ UTF-8 *comma* delimited option above.
 
 ## Correcting or removing a holding
 
-Edit the row, or delete it. If you've sold a stock entirely, delete all of its
-rows. (This is a holdings tracker, not a trade ledger — it shows what you
-currently hold and doesn't record realized gains from sales.)
+In the dashboard app: **💼 My Portfolio → 📝 Your entries → Remove** (then
+record it again correctly). It only removes the row if it still says what the
+page showed — if you changed the file in a spreadsheet meanwhile, it asks you
+to reload instead of guessing — and keeps a copy in `backups/` first.
+
+Or edit the row, or delete it, in your spreadsheet. If you've sold a stock
+entirely, delete all of its rows. (This is a holdings tracker, not a trade
+ledger — it shows what you currently hold and doesn't record realized gains
+from sales.)
 
 ## Prefer the terminal? Helper scripts
 
+(The dashboard app above does the same with a form — these are for people who
+like the command line.)
+
 `add_holding.py` (NSE stocks), `add_international_holding.py` (US stocks) and
 `add_bond.py` add one purchase for you. They write to whichever file is your
-portfolio — the matching `.csv` if it exists, otherwise the `.json`. For a CSV
-the new row goes at the end, in the file's own column order, and the file's
-line endings and encoding are kept, so a file saved from Excel or Numbers stays
+portfolio — the matching `.csv` if it exists, otherwise an existing `.json`;
+with no file at all yet they start the `.csv` (header included). For a CSV the
+new row goes at the end, in the file's own column order, and the file's line
+endings and encoding are kept, so a file saved from Excel or Numbers stays
 intact.
 
 They need the project's Python packages, so run them with the project's

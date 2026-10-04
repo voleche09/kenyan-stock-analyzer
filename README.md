@@ -15,6 +15,8 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **Sector performance** — sector-by-sector breakdown with average returns
 - **Market breadth** — advance/decline, % above SMA50, bullish MACD ratio
 - **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds and US-listed stocks, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
+- **⭐ Watchlist — NSE and international** — follow any Nairobi stock or any stock Yahoo Finance lists (US, London, Johannesburg, …) on its own page: a chart with *your* buy/sell prices drawn in, a plain-English signal checklist (trend, momentum, valuation, analysts, dividend), "needs your attention" alerts, key dates and news — see [Watchlist](#-watchlist)
+- **Click-to-add dashboard app** — double-click `Open Dashboard.command`: search for a stock by name, add it to your watchlist, record a purchase, fix a mistake, update the data — no files to edit, no commands to type
 - **Excel export** — multi-sheet workbook with all data
 - **Clean runs** — old reports and cache files are automatically removed each run
 
@@ -27,7 +29,7 @@ There are **two ways to run this project** — pick whichever fits your setup. B
 | Best for | Running it yourself, on demand, on your own machine | An always-on dashboard on a home server/NAS, refreshed on a schedule, reachable from anywhere on your Tailscale network |
 | Needs | Python 3.10+ | Docker Engine + Compose |
 | Scheduling | Your own cron entry (example below) | Built in (`supercronic`, inside the container) |
-| Serves a live web page? | No — you open the generated HTML file yourself | Yes — nginx serves it continuously on a port you choose |
+| Serves a live web page? | Optional — the dashboard app (`Open Dashboard.command`) serves it on this computer only, with click-to-add | Yes — nginx serves it continuously on a port you choose (read-only: add stocks by editing the CSV files) |
 
 ### Prerequisites
 
@@ -51,6 +53,10 @@ cp .env.example .env
 ```
 
 ### 3. Run
+
+**The easy way (recommended): double-click `Open Dashboard.command`** in this folder (Finder). A Terminal window opens, the dashboard opens in your browser at `http://127.0.0.1:8765`, and if the data isn't from today it updates itself in the background. Every page then has a **🔄 Update** button, the ⭐ Watchlist page has a search box, and 💼 My Portfolio has a **Record a purchase** form. Keep that Terminal window open while you use the dashboard; close it to stop. (From a terminal it's `./venv/bin/python3 app.py`.)
+
+**Or the classic way**, which builds every page (plus PDFs and Excel) and opens it from disk, without the click-to-add buttons:
 
 ```bash
 ./run.sh
@@ -78,7 +84,9 @@ open reports/index.html
 
 ### Track your own portfolio (optional)
 
-Put your holdings in a spreadsheet and export it as CSV — no scripts to run:
+**Easiest:** open the dashboard with `Open Dashboard.command`, go to **💼 My Portfolio → ➕ Record a purchase**, search for the stock (or pick the bond), type what you paid and click **Review → Save**. It checks the ticker exists, warns about likely typos (a price far from today's, a total typed instead of a per-share price), and saves to your private CSV file. Typed something wrong? **📝 Your entries** at the bottom of that page lists every entry with a **Remove** button (and **Undo**); a backup copy goes to `portfolio/backups/` first.
+
+Or put your holdings in a spreadsheet and export it as CSV — no scripts to run:
 
 ```bash
 cp portfolio/holdings.example.csv portfolio/holdings.csv   # then edit it in Excel / Numbers / Google Sheets
@@ -86,6 +94,29 @@ cp portfolio/holdings.example.csv portfolio/holdings.csv   # then edit it in Exc
 ```
 
 There are separate templates for US-listed stocks (`international_holdings.example.csv`, USD) and Kenya bonds (`bonds.example.csv`). Your real files are gitignored and kept out of Docker images automatically. Full guide — columns, accepted formats, saving from Excel/Numbers/Sheets, switching from the older JSON files: [`portfolio/README.md`](portfolio/README.md).
+
+### ⭐ Watchlist
+
+For stocks you're keeping an eye on but haven't bought (or want to time) — Kenyan **and** foreign.
+
+**Adding a stock** (with the dashboard app running):
+- **⭐ Watchlist page** → type a company name or ticker (*Equity*, *EABL*, *Apple*, *AAPL*, *Vodafone*) → pick it from the list (NSE and international results are labelled separately — `EQTY` is Equity Group in Nairobi but an ETF in New York) → optionally set **"tell me when it falls to"** (your buy price) and **"…or rises to"** (your sell price) → **⭐ Add**. Its card appears in about 15 seconds.
+- Or click the **☆** next to any stock on the 🏠 Overview, or **☆ Watch** at the top of any stock's page.
+- **✏️ Edit targets / note** and **🗑 Remove** (with Undo) are on every card.
+
+**What the page shows** — for every stock:
+- a chart of the last six months with the 20- and 50-day averages, the normal-range band, **your buy/sell prices** and the 52-week high/low, plus volume and RSI underneath;
+- a **signal checklist** in plain English — trend, moving averages, momentum (MACD), RSI, valuation (P/E vs the stock's sector for NSE; PEG / forward P/E abroad), what analysts say, dividend, the 0–100 factor score, liquidity — each marked 🟢 leans positive, 🔴 leans negative or ⚪ neutral, with a tally ("Mostly positive / Mixed / Mostly negative");
+- where the price sits against **your targets**, "since you started watching", 1W–1Y performance, key numbers, next earnings and ex-dividend dates, the latest headlines, and "💼 You own N shares" if you already hold it;
+- a **🔔 Needs your attention today** list across all your stocks: a target reached, near a 52-week high/low, a ±5% day, oversold/overbought, a fresh crossover, earnings this week, an ex-dividend date coming up, or a ticker with no data.
+
+It's information to help *you* decide, not advice — the checklist says what each indicator shows and why, never "buy" or "sell".
+
+**Without the app** (e.g. the Docker install), add rows to `portfolio/watchlist.csv` instead — `symbol,market,buy_below,sell_above,note` (`market` is `NSE` or `INTL`; see [`portfolio/watchlist.example.csv`](portfolio/watchlist.example.csv) and [`portfolio/README.md`](portfolio/README.md)). Like your holdings, the file is private: gitignored and kept out of Docker images. The daily summary email's ⭐ Watchlist section uses its NSE stocks too.
+
+### The dashboard app: privacy & security
+
+`Open Dashboard.command` / `app.py` runs a small web server **on this computer only** (`127.0.0.1` — nothing else on your network can reach it). It serves the pages in `reports/` and only ever writes your own files in `portfolio/`, through the same CSV code as everything else, with a backup copy in `portfolio/backups/` before anything is removed or edited. Every change must come from the dashboard's own pages (a per-session secret plus browser cross-site checks), so another website you visit can't change your portfolio, and requests addressed to any other host name are refused. Updates run `main.py` in the background (`--no-email`, so no emails are sent); a full update is built in a separate folder and only swapped in once it has finished, so a failed update never leaves you with a broken dashboard. Set `DASHBOARD_PORT` in `.env` if 8765 is taken (it also tries the next few ports by itself).
 
 ### Command-line options
 
@@ -96,7 +127,11 @@ python main.py --export-excel     # Also export Excel workbook
 python main.py --report-type both # Generate HTML + PDF (requires WeasyPrint)
 python main.py --period 1y        # Use 1 year of historical data
 python main.py --force-refresh    # Skip cache, fetch fresh data
-python main.py --watchlist-only   # Only analyze configured watchlist (10 stocks)
+python main.py --watchlist-only   # Only analyze STOCK_SYMBOLS + your watchlist's NSE stocks
+python main.py --watchlist-page-only  # Just rebuild the ⭐ Watchlist page (fast; other pages untouched)
+
+python app.py                     # The click-to-add dashboard app (what Open Dashboard.command runs)
+python app.py --no-browser --port 8800 --no-auto-update
 ```
 
 ### Daily automated run (cron)
@@ -318,6 +353,8 @@ docker compose exec generator sh -c 'cat /app/.crontab; date'
 
 # Record a purchase: edit portfolio/holdings.csv (or international_holdings.csv / bonds.csv)
 # on the host — the folder is bind-mounted, so the next run picks it up. See portfolio/README.md.
+# Same for the ⭐ watchlist: add rows to portfolio/watchlist.csv on the host. (The click-to-add
+# dashboard app is for running on your own computer; the Docker web service is read-only.)
 # Or have the helper script append the row (it writes to the CSV if you have one, else the JSON):
 docker compose exec generator python3 add_holding.py SCOM 500 34.50
 
@@ -363,6 +400,9 @@ kenyan_stock_analyzer/
 ├── send_summary.py             # Builds the 1-page PDF summary and emails it (daily job)
 ├── docker_scheduled_run.py     # Docker's scheduled job: market-closed check + full pipeline
 ├── run.sh                      # One-command runner, bare metal (venv + pipeline + open dashboard)
+├── Open Dashboard.command      # Double-click (macOS) to open the dashboard with click-to-add
+├── app.py                      # The local dashboard app (search, watchlist, record a purchase, 🔄 Update)
+├── app_assets/                 # manage.js / manage.css — the app's in-page controls
 ├── add_holding.py / add_bond.py / add_international_holding.py   # Optional terminal helpers: append a purchase to your portfolio CSV (or JSON)
 ├── scheduler.py                # Optional scheduler for automated daily runs
 ├── .github/workflows/          # GitHub Actions — daily-summary.yml (scheduled email)
@@ -390,7 +430,11 @@ kenyan_stock_analyzer/
 │   ├── portfolio.py            # Your NSE stock holdings: gain/loss, dividends, history (private)
 │   ├── international_portfolio.py  # Your US-listed holdings in USD, converted to KES (private)
 │   ├── bonds_portfolio.py      # Your Treasury/Infrastructure bonds: cash flows, accrued interest (private)
-│   ├── portfolio_csv.py        # Reads holdings.csv / international_holdings.csv / bonds.csv
+│   ├── portfolio_csv.py        # Reads/edits holdings.csv / international_holdings.csv / bonds.csv / watchlist.csv
+│   ├── watchlist.py            # Your ⭐ watchlist (private) + the plain-English signal checklist
+│   ├── watchlist_report.py     # Builds the ⭐ Watchlist page (charts, cards, attention list)
+│   ├── symbol_lookup.py        # Ticker search: NSE companies (TradingView) + international (Yahoo)
+│   ├── dashboard_app.py        # The local app: serves the pages + the add/edit/remove API, runs updates
 │   ├── config.py               # Centralized configuration from .env
 │   ├── logger.py               # Logging setup
 │   ├── utils.py                # Support/resistance detection, retry decorator
@@ -399,9 +443,10 @@ kenyan_stock_analyzer/
 ├── templates/
 │   ├── base.html               # Base HTML template with shared styles
 │   ├── stock_report.html       # Individual stock report template
+│   ├── international_stock_report.html  # Individual page for an international stock (any currency)
 │   └── market_summary.html     # Market summary template
 │
-├── portfolio/                  # YOUR private holdings (CSV/JSON, gitignored) + the tracked example templates + guide
+├── portfolio/                  # YOUR private holdings + watchlist (CSV/JSON, gitignored) + backups/ + the tracked example templates + guide
 ├── reports/                    # Generated reports (cleaned each run)
 ├── data/                       # Cached data files (cleaned each run)
 └── logs/                       # Application logs
@@ -497,6 +542,14 @@ You ran a script with your system `python3` instead of the project's virtual env
 ```
 
 (The `add_*.py` helpers now print this exact fix if you forget. If there's no `venv/` folder yet, create it once with the three commands under *Quick Start → Set up*.) Entering holdings in a CSV instead avoids scripts entirely — see [`portfolio/README.md`](portfolio/README.md).
+
+### I don't see the search box / ➕ Add / ☆ buttons
+
+Those only appear when the dashboard is opened **through the app** — double-click `Open Dashboard.command` (or run `./venv/bin/python3 app.py`) and use the browser window it opens (`http://127.0.0.1:8765/…`). A page opened straight from the `reports/` folder (what `./run.sh` does), or served by the Docker install, is read-only and shows a blue box explaining this instead.
+
+### The dashboard app's window says something went wrong / the page says the app has stopped
+
+The app only runs while its Terminal window is open — start it again with `Open Dashboard.command`. If an update failed, the 🔄 pill says so (hover it for the reason) and your previous dashboard is kept as it was; the full output of the last update is in `logs/last_update.log`.
 
 ### WeasyPrint (PDF) not working on macOS
 ```bash

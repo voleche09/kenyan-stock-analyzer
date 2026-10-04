@@ -4,12 +4,12 @@
 {% block content %}
 <!-- Header -->
 <div class="header">
-    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.name and fundamentals.name != symbol %}— {{ fundamentals.name }}{% endif %}</h1>
+    <h1>{{ ticker_logo_html|safe }}{{ symbol }} {% if fundamentals.name and fundamentals.name != symbol %}— {{ fundamentals.name }}{% endif %}<button type="button" class="wl-star app-only" data-symbol="{{ symbol }}" data-market="INTL" data-name="{{ fundamentals.name or symbol }}">☆ Watch</button></h1>
     <div class="meta">
         Generated at {{ generated_at }} |
         {% if fundamentals.sector %}{{ fundamentals.sector }}{% if fundamentals.industry %} · {{ fundamentals.industry }}{% endif %} | {% elif fundamentals.quote_type == 'ETF' %}ETF | {% endif %}
         Market Cap: {{ fmt_mcap(fundamentals.market_cap) }} |
-        Price: ${{ "%.2f"|format(latest.close) if latest.close else 'N/A' }}
+        Price: {{ money(latest.close) if latest.close else 'N/A' }}
         {% if price_kes %}(≈ KES {{ "%.2f"|format(price_kes) }}){% endif %}
         {% if daily_change is not none %}
         | Daily Change: <span class="{% if daily_change >= 0 %}positive{% else %}negative{% endif %}">
@@ -23,6 +23,7 @@
 <div class="nav-bar">
     <a href="index.html" class="nav-item">🏠 Overview</a>
     <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="watchlist.html" class="nav-item">⭐ Watchlist</a>
     <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
     <a href="technicals.html" class="nav-item">📈 Technicals</a>
     <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>
@@ -37,8 +38,13 @@
 </div>
 
 <div style="background:#eff6ff;border-left:6px solid #3b82f6;border-radius:8px;padding:10px 18px;margin-bottom:16px;font-size:0.85rem;color:#1e3a8a;">
+    {% if context == 'watchlist' %}
+    ⭐ This stock is on your private <strong>watchlist</strong> — {{ fundamentals.exchange_name ~ ' · ' if fundamentals.exchange_name else '' }}priced in {{ currency }}, sourced from Yahoo Finance,
+    analyzed with the exact same technical-analysis engine used for your NSE stocks.
+    {% else %}
     🌍 This is one of your private <strong>international (US-listed)</strong> holdings — priced in USD, sourced from Yahoo Finance,
     analyzed with the exact same technical-analysis engine used for your NSE stocks. Never committed to git.
+    {% endif %}
 </div>
 
 <!-- ============================================================ -->
@@ -65,7 +71,7 @@
             <div class="label">Dividend</div>
             <div class="value" style="font-size:1rem;">
                 {% if fundamentals.dividend_rate and fundamentals.dividend_rate > 0 %}
-                <span style="background:#ccfbf1;color:#0f766e;font-weight:700;padding:2px 10px;border-radius:10px;">${{ "%.2f"|format(fundamentals.dividend_rate) }}/share/yr</span>
+                <span style="background:#ccfbf1;color:#0f766e;font-weight:700;padding:2px 10px;border-radius:10px;">{{ money(fundamentals.dividend_rate) }}/share/yr</span>
                 {% else %}
                 <span style="background:#f1f5f9;color:#94a3b8;font-weight:600;padding:2px 10px;border-radius:10px;">0 — no dividend</span>
                 {% endif %}
@@ -78,7 +84,7 @@
         <div class="metric">
             <div class="label">52-Week Range</div>
             <div class="value" style="font-size:1rem;">
-                {% if fundamentals.week52_low and fundamentals.week52_high %}${{ "%.2f"|format(fundamentals.week52_low) }} – ${{ "%.2f"|format(fundamentals.week52_high) }}{% else %}N/A{% endif %}
+                {% if fundamentals.week52_low and fundamentals.week52_high %}{{ money(fundamentals.week52_low) }} – {{ money(fundamentals.week52_high) }}{% else %}N/A{% endif %}
             </div>
             {% if fundamentals.week52_low and fundamentals.week52_high and latest.close %}
             {% set rng = fundamentals.week52_high - fundamentals.week52_low %}
@@ -121,9 +127,9 @@
         <div class="metric">
             <div class="label">Analyst Target (Low – Mean – High)</div>
             <div class="value" style="font-size:1rem;">
-                ${{ "%.2f"|format(fundamentals.target_low_price) if fundamentals.target_low_price else '—' }} –
-                <strong>${{ "%.2f"|format(fundamentals.target_mean_price) }}</strong> –
-                ${{ "%.2f"|format(fundamentals.target_high_price) if fundamentals.target_high_price else '—' }}
+                {{ money(fundamentals.target_low_price) if fundamentals.target_low_price else '—' }} –
+                <strong>{{ money(fundamentals.target_mean_price) }}</strong> –
+                {{ money(fundamentals.target_high_price) if fundamentals.target_high_price else '—' }}
             </div>
         </div>
         <div class="metric">
@@ -167,8 +173,8 @@
     <div class="metrics-grid">
         <div class="metric"><div class="label">Revenue Growth (YoY)</div><div class="value {{ fund_color('rg', fundamentals.revenue_growth_yoy) }}">{{ "%.2f"|format(fundamentals.revenue_growth_yoy) ~ '%' if fundamentals.revenue_growth_yoy is not none else 'N/A' }}</div></div>
         <div class="metric"><div class="label">Earnings Growth (YoY)</div><div class="value {{ fund_color('eps_growth', fundamentals.earnings_growth_yoy) }}">{{ "%.2f"|format(fundamentals.earnings_growth_yoy) ~ '%' if fundamentals.earnings_growth_yoy is not none else 'N/A' }}</div></div>
-        <div class="metric"><div class="label">EPS (TTM)</div><div class="value {{ fund_color('eps', fundamentals.eps_ttm) }}">${{ "%.2f"|format(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div></div>
-        <div class="metric"><div class="label">Forward EPS</div><div class="value">${{ "%.2f"|format(fundamentals.forward_eps) if fundamentals.forward_eps else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">EPS (TTM)</div><div class="value {{ fund_color('eps', fundamentals.eps_ttm) }}">{{ money(fundamentals.eps_ttm) if fundamentals.eps_ttm else 'N/A' }}</div></div>
+        <div class="metric"><div class="label">Forward EPS</div><div class="value">{{ money(fundamentals.forward_eps) if fundamentals.forward_eps else 'N/A' }}</div></div>
         <div class="metric"><div class="label">Revenue (TTM)</div><div class="value">{{ fmt_currency(fundamentals.revenue_ttm) }}</div></div>
         <div class="metric"><div class="label">Net Income (TTM)</div><div class="value">{{ fmt_currency(fundamentals.net_income_ttm) }}</div></div>
         <div class="metric"><div class="label">Free Cash Flow (TTM)</div><div class="value">{{ fmt_currency(fundamentals.free_cash_flow_ttm) }}</div></div>
@@ -249,12 +255,12 @@
     <div class="levels-row">
         {% if supports %}
         <div class="level-box"><h3>🟢 Support Levels (floor)</h3>
-            {% for level in supports[:5] %}<span class="level-badge support">${{ "%.2f"|format(level) }}</span>{% endfor %}
+            {% for level in supports[:5] %}<span class="level-badge support">{{ money(level) }}</span>{% endfor %}
         </div>
         {% endif %}
         {% if resistances %}
         <div class="level-box"><h3>🔴 Resistance Levels (ceiling)</h3>
-            {% for level in resistances[:5] %}<span class="level-badge resistance">${{ "%.2f"|format(level) }}</span>{% endfor %}
+            {% for level in resistances[:5] %}<span class="level-badge resistance">{{ money(level) }}</span>{% endfor %}
         </div>
         {% endif %}
     </div>
@@ -271,7 +277,7 @@
             <thead><tr><th>Date</th><th>Amount per Share</th></tr></thead>
             <tbody>
                 {% for d in dividend_history|reverse %}
-                <tr><td>{{ d.date }}</td><td>${{ "%.4f"|format(d.amount) }}</td></tr>
+                <tr><td>{{ d.date }}</td><td>{{ money(d.amount, 4) }}</td></tr>
                 {% endfor %}
             </tbody>
         </table>
@@ -314,10 +320,10 @@
                 {% for row in recent_data %}
                 <tr>
                     <td>{{ row.get('date', 'N/A') }}</td>
-                    <td>${{ "%.2f"|format(row.open) if row.open is not none else 'N/A' }}</td>
-                    <td>${{ "%.2f"|format(row.high) if row.high is not none else 'N/A' }}</td>
-                    <td>${{ "%.2f"|format(row.low) if row.low is not none else 'N/A' }}</td>
-                    <td>${{ "%.2f"|format(row.close) if row.close is not none else 'N/A' }}</td>
+                    <td>{{ money(row.open) if row.open is not none else 'N/A' }}</td>
+                    <td>{{ money(row.high) if row.high is not none else 'N/A' }}</td>
+                    <td>{{ money(row.low) if row.low is not none else 'N/A' }}</td>
+                    <td>{{ money(row.close) if row.close is not none else 'N/A' }}</td>
                     <td>{{ row.volume or 'N/A' }}</td>
                 </tr>
                 {% endfor %}
@@ -379,6 +385,7 @@
 <div class="nav-bar bottom-nav">
     <a href="index.html" class="nav-item">🏠 Overview</a>
     <a href="portfolio.html" class="nav-item">💼 My Portfolio</a>
+    <a href="watchlist.html" class="nav-item">⭐ Watchlist</a>
     <a href="visuals.html" class="nav-item">🗺️ Visuals</a>
     <a href="technicals.html" class="nav-item">📈 Technicals</a>
     <a href="fundamentals.html" class="nav-item">💰 Fundamentals</a>

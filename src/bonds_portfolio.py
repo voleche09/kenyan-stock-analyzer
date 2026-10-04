@@ -261,8 +261,11 @@ def add_bond(portfolio_dir, issue, face_value, purchase_price_pct=100.0,
             purchase_date=None, note=""):
     """Append one bond holding and return the updated full list. Goes to
     bonds.csv if it exists (added in the file's own column layout), otherwise
-    bonds.json (created if needed) — never to a JSON file a CSV is shadowing."""
+    an existing bonds.json; with no file at all yet, bonds.csv is started —
+    never to a JSON file a CSV is shadowing."""
     csv_path = os.path.join(portfolio_dir, BONDS_CSV_FILE)
+    if not os.path.exists(csv_path) and not os.path.exists(_bonds_path(portfolio_dir)):
+        portfolio_csv.create_csv(csv_path, portfolio_csv.BOND_FIELDS)
     if os.path.exists(csv_path):
         dropped = portfolio_csv.append_row(csv_path, portfolio_csv.BOND_FIELDS, {
             "issue": _canonical_issue(issue), "face_value": float(face_value),

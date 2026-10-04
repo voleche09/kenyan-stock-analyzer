@@ -221,8 +221,19 @@
             .theme-toggle { display: none; }
         }
 
+        /* Dashboard-app hooks (same rules as the dashboard pages): the ☆ Watch
+           button only appears when these pages are served by the local app. */
+        html:not(.app-on) .app-only { display: none !important; }
+        html.app-on .no-app-only { display: none !important; }
+        html.app-pending .no-app-only { visibility: hidden; }
+        .wl-star { border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.1); color: #fde68a; border-radius: 20px; padding: 3px 12px; font-size: 0.85rem; cursor: pointer; margin-left: 12px; vertical-align: middle; font-family: inherit; }
+        .wl-star:hover { background: rgba(255,255,255,0.2); }
+        .wl-star.on { background: #f59e0b; color: #1e293b; border-color: #f59e0b; }
+
         {% block extra_css %}{% endblock %}
     </style>
+    <link rel="stylesheet" href="/app-assets/manage.css">
+    <script>(function(){if(/^https?:$/.test(location.protocol)){var d=document.documentElement;d.classList.add('app-pending');setTimeout(function(){d.classList.remove('app-pending');},2500);}})();</script>
 </head>
 <body>
     <div class="container">
@@ -250,5 +261,6 @@
         };
         h.appendChild(b);
     })();</script>
+    <script src="/app-assets/manage.js" defer></script>
 </body>
 </html>

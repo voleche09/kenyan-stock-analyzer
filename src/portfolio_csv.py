@@ -39,13 +39,22 @@ append_row() is what the add_*.py helper scripts use when a CSV is the
 portfolio: it adds one row at the end of the file in the file's OWN column
 order and spelling, keeping its BOM, line endings and encoding, so a file
 exported from a spreadsheet stays intact.
+
+remove_row() / update_row() are what the dashboard app uses to fix a mistake:
+they change exactly ONE record, keep every other record byte-for-byte, refuse
+if that record no longer says what the caller saw (the file was edited since —
+RowChangedError), take a safety copy in portfolio/backups/ first, and replace
+the file atomically so a crash can never leave it half-written.
 """
 
+import codecs
 import csv
 import io
 import math
 import os
 import re
+import shutil
+import tempfile
 import datetime as dt
 from collections import namedtuple
 
@@ -87,6 +96,17 @@ class CsvFormatError(ValueError):
     """The file as a whole can't be used (unreadable, wrong delimiter, a required column is missing)."""
 
 
+class RowChangedError(ValueError):
+    """The row an edit was aimed at no longer says what the caller saw — the
+    file was changed in the meantime (e.g. in a spreadsheet app). Nothing was
+    written; reload and try again."""
+
+
+# Safety copies taken before a row is removed or edited (gitignored + dockerignored).
+BACKUP_SUBDIR = "backups"
+MAX_BACKUPS_PER_FILE = 20
+
+
 # ----------------------------------------------------------------------------
 # Which file is the portfolio — CSV or the older JSON?
 # ----------------------------------------------------------------------------
@@ -119,8 +139,8 @@ def saved_to_message(portfolio_dir, csv_name, json_name):
     the one real hazard of editing a file behind a spreadsheet app's back."""
     if os.path.exists(os.path.join(portfolio_dir, csv_name)):
         return (f"Saved to portfolio/{csv_name}. (If that file is open in Excel, Numbers or "
-                f"Sheets, close it WITHOUT saving or reload it — otherwise the app overwrites "
-                f"this new row the next time you save.)")
+                f"Sheets, close it WITHOUT saving or reload it — otherwise the spreadsheet "
+                f"overwrites this new row the next time you save it there.)")
     return f"Saved to portfolio/{json_name}."
 
 
@@ -232,11 +252,15 @@ def _split_table(name, text):
                 header = cells
             continue
         body.append((reader.line_num, cells))
+    _check_delimiter(name, header)
+    return header, body
+
+
+def _check_delimiter(name, header):
     if header is not None and len(header) == 1 and re.search(r"[;\t|]", header[0]):
         raise CsvFormatError(
             f"{name} looks semicolon- or tab-separated, not comma-separated. Re-export it as "
             f"comma-separated (Excel: 'CSV UTF-8 (Comma delimited)'; Numbers: Export To > CSV)")
-    return header, body
 
 
 def _resolve_columns(name, header, fields):
@@ -288,27 +312,33 @@ def read_rows(path, fields):
     for line_no, cells in body:
         if not any(c.strip() for c in cells):
             continue
-        record, problem = {}, None
-        for f in fields:
-            idx = colmap.get(f.name)
-            raw = cells[idx].strip() if idx is not None and idx < len(cells) else ""
-            try:
-                value = _parse_cell(f.kind, raw)
-            except ValueError as e:
-                if f.required:
-                    problem = f"{f.name}: {e}"
-                    break
-                logger.warning(f"{name} line {line_no}: {f.name} {e} — ignoring that value")
-                value = None
-            if f.required and value is None:
-                problem = f"{f.name} is blank"
-                break
-            record[f.name] = value
+        record, problem = _parse_record(name, line_no, cells, colmap, fields)
         if problem:
             logger.warning(f"{name} line {line_no}: {problem} — skipping this row")
             continue
         out.append((line_no, record))
     return out
+
+
+def _parse_record(name, line_no, cells, colmap, fields, log=True):
+    """One CSV record -> ({field: value}, problem-or-None). A bad OPTIONAL value
+    becomes None (logged when log=True); a bad/blank REQUIRED value is a problem."""
+    record = {}
+    for f in fields:
+        idx = colmap.get(f.name)
+        raw = cells[idx].strip() if idx is not None and idx < len(cells) else ""
+        try:
+            value = _parse_cell(f.kind, raw)
+        except ValueError as e:
+            if f.required:
+                return record, f"{f.name}: {e}"
+            if log:
+                logger.warning(f"{name} line {line_no}: {f.name} {e} — ignoring that value")
+            value = None
+        if f.required and value is None:
+            return record, f"{f.name} is blank"
+        record[f.name] = value
+    return record, None
 
 
 # ----------------------------------------------------------------------------
@@ -364,3 +394,220 @@ def append_row(path, fields, values):
     with open(path, "ab") as f:
         f.write(payload.encode(encoding, errors="replace"))
     return dropped
+
+
+# ----------------------------------------------------------------------------
+# Creating a new file, and fixing one row (used by the dashboard app)
+# ----------------------------------------------------------------------------
+# Public names for the cell parsers, so the app checks typed-in values with
+# exactly the same rules as the files ("1,234.50" ok, "224,3" refused, ...).
+parse_number = _parse_number
+parse_date = _parse_date
+
+
+def unstorable_fields(path, fields, values):
+    """Which of `values` (optional fields with a value) an existing CSV has no
+    column for — i.e. what append_row would have to drop. [] if the file
+    doesn't exist yet (it will be created with every column)."""
+    if not os.path.exists(path):
+        return []
+    name = os.path.basename(path)
+    _raw, text, _enc = _load(path)
+    header, _body = _split_table(name, text)
+    if header is None:
+        return []
+    colmap, _used = _resolve_columns(name, header, fields)
+    return [f.name for f in fields
+            if values.get(f.name) not in (None, "") and f.name not in colmap]
+
+
+def create_csv(path, fields):
+    """Start a new portfolio CSV that holds just the header row (the canonical
+    column names, same as the *.example.csv templates). Refuses to overwrite."""
+    name = os.path.basename(path)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    try:
+        with open(path, "x", encoding="utf-8", newline="") as f:
+            csv.writer(f, lineterminator="\n").writerow([fl.name for fl in fields])
+    except FileExistsError:
+        raise CsvFormatError(f"{name} already exists — not overwriting it")
+
+
+def _read_records(path):
+    """
+    Split a CSV file into records while keeping each record's EXACT original
+    bytes, so an edit can rewrite one record and leave every other one alone.
+
+    Returns (bom, encoding, records); each record is a dict with
+        line  — its LAST physical line number (the number read_rows reports)
+        raw   — its exact bytes, line terminator(s) included
+        cells — its parsed cells
+        term  — its own line terminator ('' if the file ends without one)
+    The file is split on a byte-preserving decoding (UTF-8, else Latin-1, which
+    maps every byte 1:1) while cells are decoded the way _load reads the file
+    (UTF-8, else Windows-1252).
+    """
+    name = os.path.basename(path)
+    try:
+        with open(path, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        raise CsvFormatError(f"{name} could not be read ({e})")
+    bom = codecs.BOM_UTF8 if raw.startswith(codecs.BOM_UTF8) else b""
+    body = raw[len(bom):]
+    try:
+        text, split_codec, encoding = body.decode("utf-8"), "utf-8", "utf-8"
+    except UnicodeDecodeError:
+        text, split_codec, encoding = body.decode("latin-1"), "latin-1", "cp1252"
+
+    lines = list(io.StringIO(text, newline=""))
+    reader = csv.reader(iter(lines))
+    records, start = [], 0
+    for cells in reader:
+        end = reader.line_num
+        chunk = "".join(lines[start:end])
+        start = end
+        if split_codec == "latin-1":
+            proper = chunk.encode("latin-1").decode("cp1252", errors="replace")
+            cells = next(csv.reader(io.StringIO(proper, newline="")), [])
+        body_only = chunk.rstrip("\r\n")
+        records.append({"line": end, "raw": chunk.encode(split_codec), "cells": cells,
+                        "term": chunk[len(body_only):]})
+    return bom, encoding, records
+
+
+def _locate(path, fields, line_no):
+    """-> (bom, encoding, records, header_cells, colmap, target_record). Raises
+    CsvFormatError if the file can't be used, RowChangedError if `line_no` is
+    not (or no longer) a data row."""
+    name = os.path.basename(path)
+    bom, encoding, records = _read_records(path)
+    header_at = next((i for i, r in enumerate(records) if any(c.strip() for c in r["cells"])), None)
+    if header_at is None:
+        raise RowChangedError(f"{name} is empty — there is no row {line_no} to change. "
+                              f"Reload the page and try again.")
+    header = records[header_at]["cells"]
+    _check_delimiter(name, header)
+    colmap, _used = _resolve_columns(name, header, fields)
+    target = next((r for r in records[header_at + 1:]
+                   if r["line"] == line_no and any(c.strip() for c in r["cells"])), None)
+    if target is None:
+        raise RowChangedError(f"{name} no longer has that row (line {line_no}) — it was changed "
+                              f"since this page loaded. Reload the page and try again.")
+    return bom, encoding, records, header, colmap, target
+
+
+def _same(a, b):
+    if a in (None, "") and b in (None, ""):
+        return True
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return math.isclose(float(a), float(b), rel_tol=1e-9, abs_tol=1e-9)
+    return str(a).strip().upper() == str(b).strip().upper()
+
+
+def _check_expect(name, line_no, values, expect):
+    """Refuse to touch a row that no longer says what the caller saw."""
+    for key, want in (expect or {}).items():
+        have = values.get(key)
+        if not _same(have, want):
+            raise RowChangedError(
+                f"{name} line {line_no} has changed since this page loaded ({key} is now "
+                f"{have if have not in (None, '') else 'blank'}, expected {want}). Nothing was "
+                f"changed — reload the page and try again.")
+
+
+def _atomic_write(path, payload):
+    """Replace `path` with `payload` in one step (temp file + os.replace), keeping
+    the original file's permissions. The temp file ends in .csv on purpose, so
+    if the process ever dies mid-write the leftover is still covered by the
+    portfolio/*.csv ignore rules (it holds the same private data)."""
+    folder = os.path.dirname(os.path.abspath(path))
+    fd, tmp = tempfile.mkstemp(prefix=f".tmp-{os.path.basename(path)}-", suffix=".csv", dir=folder)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(payload)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            shutil.copymode(path, tmp)
+        except OSError:
+            pass
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def backup_file(path):
+    """Copy a portfolio file to <its folder>/backups/<name>.<timestamp>.bak and
+    keep only the newest MAX_BACKUPS_PER_FILE copies of it. Returns the copy's path."""
+    folder = os.path.join(os.path.dirname(os.path.abspath(path)), BACKUP_SUBDIR)
+    os.makedirs(folder, exist_ok=True)
+    base = os.path.basename(path)
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+    dest = os.path.join(folder, f"{base}.{stamp}.bak")
+    shutil.copy2(path, dest)
+    copies = sorted(f for f in os.listdir(folder) if f.startswith(base + ".") and f.endswith(".bak"))
+    for old in copies[:-MAX_BACKUPS_PER_FILE]:
+        try:
+            os.remove(os.path.join(folder, old))
+        except OSError:
+            pass
+    return dest
+
+
+def remove_row(path, fields, line_no, expect=None, backup=True):
+    """
+    Delete the data row that read_rows() reported as `line_no`, leaving every
+    other byte of the file as it was. `expect` ({field: value}) must still match
+    that row, otherwise RowChangedError is raised and nothing is written.
+    Returns the removed row's values ({field: value}).
+    """
+    name = os.path.basename(path)
+    bom, _enc, records, _header, colmap, target = _locate(path, fields, line_no)
+    values, _problem = _parse_record(name, line_no, target["cells"], colmap, fields, log=False)
+    _check_expect(name, line_no, values, expect)
+    if backup:
+        backup_file(path)
+    _atomic_write(path, bom + b"".join(r["raw"] for r in records if r is not target))
+    return values
+
+
+def update_row(path, fields, line_no, expect, changes, backup=True):
+    """
+    Change some fields of the row read_rows() reported as `line_no`, in place,
+    leaving every other row (and that row's other columns) as they were.
+    `expect` must still match the row (else RowChangedError, nothing written).
+    A change for a field the file has no column for can't be stored; those
+    field names are returned (same contract as append_row) and the rest is saved.
+    Returns (new_values, dropped).
+    """
+    name = os.path.basename(path)
+    bom, encoding, records, header, colmap, target = _locate(path, fields, line_no)
+    values, _problem = _parse_record(name, line_no, target["cells"], colmap, fields, log=False)
+    _check_expect(name, line_no, values, expect)
+
+    cells = list(target["cells"]) + [""] * max(0, len(header) - len(target["cells"]))
+    dropped = []
+    for field_name, value in changes.items():
+        idx = colmap.get(field_name)
+        if idx is None:
+            if value not in (None, ""):
+                dropped.append(field_name)
+            continue
+        cells[idx] = "" if value is None else _format_cell(value)
+
+    term = target["term"]
+    out = io.StringIO()
+    csv.writer(out, lineterminator=term or "\n").writerow(cells)
+    row_text = out.getvalue() if term else out.getvalue()[:-1]
+    new_raw = row_text.encode(encoding, errors="replace")
+
+    if backup:
+        backup_file(path)
+    _atomic_write(path, bom + b"".join(new_raw if r is target else r["raw"] for r in records))
+    new_values, _ = _parse_record(name, line_no, cells, colmap, fields, log=False)
+    return new_values, dropped

@@ -16,6 +16,7 @@ import base64
 import io
 import json
 from datetime import datetime
+from html import escape
 import logging
 
 # Fix WeasyPrint on macOS
@@ -140,10 +141,10 @@ class ReportGenerator:
     #  Chart builders
     # ============================================================
 
-    def _fig_to_b64(self):
+    def _fig_to_b64(self, dpi=150):
         """Save current figure to base64 PNG string."""
         buf = io.BytesIO()
-        plt.savefig(buf, format='png', dpi=150, bbox_inches='tight')
+        plt.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
         buf.seek(0)
         data = base64.b64encode(buf.read()).decode('utf-8')
         plt.close()
@@ -459,13 +460,16 @@ class ReportGenerator:
 
     def generate_international_stock_report(self, symbol, analysis_result, report_type='html',
                                              fundamentals=None, score=None, dividend_history=None,
-                                             earnings_calendar=None, news=None, usd_kes=None):
+                                             earnings_calendar=None, news=None, usd_kes=None,
+                                             context='holding'):
         """
-        Per-stock report for an international (US-listed, USD) holding —
-        same shape as generate_stock_report(), reusing the exact same chart
-        builders, interpret_* explainers and fund_color thresholds (all
-        already currency-agnostic). USD-first; a KES-converted price is
-        shown alongside if a live FX rate was fetched this run.
+        Per-stock report for an international stock — a US-listed holding, or
+        (context='watchlist') any stock on the watchlist, in whatever currency
+        Yahoo quotes it (USD, GBp, EUR, ...). Same shape as
+        generate_stock_report(), reusing the exact same chart builders,
+        interpret_* explainers and fund_color thresholds (all already
+        currency-agnostic). A KES-converted price is shown alongside for USD
+        stocks if a live FX rate was fetched this run.
         """
         if not analysis_result or 'data' not in analysis_result:
             logger.error(f"Invalid analysis result for international stock {symbol}")
@@ -511,15 +515,35 @@ class ReportGenerator:
         rec_class = {'bullish': 'buy', 'bearish': 'sell', 'neutral': 'hold'}.get(rec_class_raw, 'none')
 
         price = latest.get('close')
-        fx_rate = usd_kes.get('rate') if usd_kes else None
+        currency = fundamentals.get('currency') or 'USD'
+        fx_rate = usd_kes.get('rate') if (usd_kes and currency == 'USD') else None
         price_kes = (price * fx_rate) if (price is not None and fx_rate) else None
 
         target_mean = fundamentals.get('target_mean_price')
         target_upside_pct = ((target_mean - price) / price * 100.0) if (target_mean and price) else None
 
+        # Prices in the stock's own currency: "$123.45" for USD (unchanged),
+        # "126.80 GBp" for anything else. Big numbers likewise.
+        def money(value, decimals=2):
+            if value is None:
+                return 'N/A'
+            if currency == 'USD':
+                return f"${value:.{decimals}f}"
+            return f"{value:.{decimals}f} {currency}"
+
+        if currency == 'USD':
+            fmt_mcap, fmt_currency = self._fmt_mcap_usd, self._fmt_currency_usd
+        else:
+            import watchlist as _wl
+            fmt_mcap = fmt_currency = (lambda v: _wl.fmt_big(v, currency) if v else 'N/A')
+
         template_data = {
             'symbol': symbol,
-            'ticker_logo_html': self._ticker_logo_html(symbol, website=fundamentals.get('website')),
+            'context': context,
+            'currency': currency,
+            'money': money,
+            'ticker_logo_html': self._ticker_logo_html(symbol, website=fundamentals.get('website'),
+                                                       international=True),
             'generated_at': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'data_date': data_date,
             'latest': latest,
@@ -541,9 +565,9 @@ class ReportGenerator:
             'target_upside_pct': target_upside_pct,
             # Helper functions for the template — reused unchanged from the NSE
             # report where currency-agnostic (interpret_*, fund_color); USD
-            # variants for the two that hardcode "KES".
-            'fmt_mcap': self._fmt_mcap_usd,
-            'fmt_currency': self._fmt_currency_usd,
+            # (or the stock's own currency) variants for the two that hardcode "KES".
+            'fmt_mcap': fmt_mcap,
+            'fmt_currency': fmt_currency,
             'interpret_pe': self._interpret_pe,
             'interpret_peg': self._interpret_peg,
             'interpret_roe': self._interpret_roe,
@@ -568,21 +592,28 @@ class ReportGenerator:
         except Exception:
             return {}
 
-    def _ticker_logo_html(self, symbol, website=None):
+    def _ticker_logo_html(self, symbol, website=None, international=False):
         """
         Circular company-logo <img> for a ticker, or a colored-initial
         fallback badge if no logo is available — see company_logos.py for
         the source, caching and privacy rationale. Memoized per symbol for
         this run (self._logo_html_cache) since the same symbol is rendered
         in several tables.
+
+        international=True: only the stock's own website counts — never the
+        NSE ticker->domain map, because the same ticker can be a different
+        company abroad (EQTY is Equity Group in Nairobi but an ETF in New York).
         """
-        cache_key = f"{symbol}|{website or ''}"
+        cache_key = f"{symbol}|{website or ''}|{'intl' if international else 'nse'}"
         cached = self._logo_html_cache.get(cache_key)
         if cached is not None:
             return cached
 
         import company_logos as _logos
-        domain = _logos.resolve_domain(symbol, website=website)
+        if international and not website:
+            domain = None
+        else:
+            domain = _logos.resolve_domain(symbol, website=website)
         b64 = _logos.fetch_logo_base64(domain, cache_dir=self.cache_dir) if domain else None
         if b64:
             html = (f'<img class="ticker-logo" src="data:image/png;base64,{b64}" '
@@ -1185,6 +1216,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
 
             stock = {
                 'symbol': symbol,
+                'name': fund.get('name'),
                 'price': latest.get('close'),
                 'rsi': latest.get('rsi'),
                 'change': round(chg, 2) if chg is not None else None,
@@ -1297,6 +1329,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
     _NAV = [
         ('index.html', '🏠 Overview'),
         ('portfolio.html', '💼 My Portfolio'),
+        ('watchlist.html', '⭐ Watchlist'),
         ('visuals.html', '🗺️ Visuals'),
         ('technicals.html', '📈 Technicals'),
         ('fundamentals.html', '💰 Fundamentals'),
@@ -1565,6 +1598,76 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 .networth-bar { display: flex; height: 10px; border-radius: 6px; overflow: hidden; margin-top: 14px; background: rgba(255,255,255,0.08); }
 .networth-bar > div:first-child { background: #3b82f6; }
 .networth-bar > div:last-child { background: #16a34a; }
+/* ===== Dashboard-app hooks =====
+   .app-only controls (add / edit / remove / ☆ buttons) only work when the
+   pages are served by the local app (app.py) — manage.js marks <html> with
+   .app-on once it has confirmed the app is there. Everywhere else (opened from
+   disk, or the Docker nginx) they stay hidden and .no-app-only explains how
+   to add things instead. .app-pending hides that explanation for a moment
+   while the check runs, so it doesn't flash up when the app IS running. */
+html:not(.app-on) .app-only { display: none !important; }
+html.app-on .no-app-only { display: none !important; }
+html.app-pending .no-app-only { visibility: hidden; }
+.wl-star { border: 1px solid var(--border); background: var(--card-bg); color: #f59e0b; border-radius: 20px; padding: 1px 7px; font-size: 0.8rem; cursor: pointer; margin-left: 6px; line-height: 1.3; font-family: inherit; }
+.wl-star:hover { border-color: #f59e0b; }
+.wl-star.on { background: #fef3c7; border-color: #f59e0b; }
+/* ===== Watchlist page ===== */
+.wl-table td { vertical-align: middle; }
+.wl-name-sm { display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 400; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.wl-mkt { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 1px 7px; border-radius: 10px; background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); white-space: nowrap; }
+.range-bar { position: relative; width: 110px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #fecaca, #fde68a, #bbf7d0); display: inline-block; vertical-align: middle; }
+.range-bar > i { position: absolute; top: -3px; width: 4px; height: 14px; border-radius: 2px; background: #0f172a; margin-left: -2px; }
+:root[data-theme="dark"] .range-bar > i { background: #f8fafc; }
+.chip { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; white-space: nowrap; }
+.chip-buy { background: #dcfce7; color: #166534; }
+.chip-sell { background: #fee2e2; color: #991b1b; }
+.chip-neutral { background: #fef3c7; color: #92400e; }
+.chip-none { background: var(--surface); color: var(--text-muted); border: 1px solid var(--border); }
+.wl-attn { list-style: none; display: grid; gap: 6px; }
+.wl-attn li { background: var(--surface); border: 1px solid var(--border); border-left: 4px solid #f59e0b; border-radius: 8px; padding: 8px 12px; font-size: 0.86rem; }
+.wl-attn li a { color: inherit; text-decoration: none; }
+.wl-attn li a:hover { text-decoration: underline; }
+.wl-card { scroll-margin-top: 140px; }
+.wl-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.wl-title { font-size: 1.15rem; font-weight: 800; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.wl-title .ticker-logo, .wl-title .ticker-logo-fallback { width: 30px; height: 30px; font-size: 0.8rem; margin-right: 0; }
+.wl-title .wl-fullname { font-weight: 500; color: var(--text-muted); font-size: 0.92rem; }
+.wl-price { text-align: right; }
+.wl-price .wl-p { font-size: 1.5rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.wl-sub { color: var(--text-muted); font-size: 0.82rem; margin: 6px 0 10px; display: flex; gap: 14px; flex-wrap: wrap; }
+.wl-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.wl-body { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 18px; align-items: start; }
+.wl-body .chart-img { margin-top: 0; width: 100%; }
+.wl-check { list-style: none; display: grid; gap: 6px; }
+.wl-check li { display: grid; grid-template-columns: 22px 1fr; gap: 6px; font-size: 0.84rem; line-height: 1.4; }
+.wl-check li b { font-weight: 700; }
+.wl-check li.na { color: var(--text-muted); }
+.wl-tally { margin-top: 10px; font-size: 0.8rem; color: var(--text-muted); }
+.wl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 16px; }
+.wl-box { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 0.84rem; }
+.wl-box h4 { font-size: 0.78rem; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; letter-spacing: 0.03em; }
+.wl-kv { display: flex; justify-content: space-between; gap: 10px; margin: 3px 0; }
+.wl-kv span:first-child { color: var(--text-muted); }
+.wl-kv span:last-child { font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.perf-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.perf-chips span { padding: 3px 8px; border-radius: 8px; font-size: 0.78rem; font-weight: 700; background: var(--card-bg); border: 1px solid var(--border); }
+.wl-news a { color: #3b82f6; text-decoration: none; display: block; margin: 4px 0; line-height: 1.35; }
+.wl-news a:hover { text-decoration: underline; }
+.wl-news small { color: var(--text-muted); }
+.wl-note { margin-top: 12px; background: #fefce8; border: 1px solid #fde68a; color: #713f12; border-radius: 8px; padding: 8px 12px; font-size: 0.85rem; }
+:root[data-theme="dark"] .wl-note { background: #3f3a12; border-color: #854d0e; color: #fef3c7; }
+.wl-links { margin-top: 12px; display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.85rem; align-items: center; }
+.wl-links a { color: #3b82f6; font-weight: 600; text-decoration: none; }
+.wl-links a:hover { text-decoration: underline; }
+.wl-actions { display: flex; gap: 8px; margin-left: auto; }
+.wl-empty { text-align: center; padding: 34px 20px; }
+.wl-empty .big { font-size: 2.6rem; }
+.wl-empty h2 { border-bottom: none; display: block; margin-bottom: 8px; }
+.wl-empty p { color: var(--text-muted); max-width: 640px; margin: 6px auto; line-height: 1.5; }
+.wl-nodata { color: var(--text-muted); font-size: 0.88rem; padding: 10px 0; }
+@media (max-width: 900px) { .wl-body { grid-template-columns: 1fr; } .wl-price { text-align: left; } }
+/* On a phone the sticky header would cover half the screen — let it scroll away. */
+@media (max-width: 640px) { .topbar { position: static; } .wl-card { scroll-margin-top: 10px; } }
 </style>"""
 
     def _make_foreign_flow_trend_chart(self, weeks):
@@ -1617,6 +1720,35 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         ax.grid(True, alpha=0.3)
         plt.xticks(rotation=30, ha='right')
         return self._fig_to_b64()
+
+    @staticmethod
+    def page_subtitle(total=None, data_date=None, usd_kes=None):
+        """The grey line under the dashboard title (shared by every page)."""
+        now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
+        data_date_str = data_date or datetime.now().strftime('%Y-%m-%d')
+        fx = f" · 💵 USD/KES {usd_kes['rate']:.2f}" if (usd_kes and usd_kes.get('rate')) else ""
+        count = f"{total} stocks · " if total is not None else ""
+        return (f"{now} · {count}📅 {data_date_str} · "
+                f"Prices: NSE official close · Fundamentals: TradingView{fx}")
+
+    def write_page(self, filename, html):
+        """Write one dashboard page atomically (temp file + rename), so the
+        dashboard app never serves a half-written page while it's being rebuilt."""
+        path = os.path.join(self.output_dir, filename)
+        tmp = f"{path}.{os.getpid()}.tmp"
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.write(html)
+        os.replace(tmp, path)
+        return path
+
+    # The local dashboard app (app.py) serves these two files. Opened any other
+    # way (file://, the Docker nginx) they simply fail to load and every
+    # app-only control stays hidden — see the html.app-on rules in the CSS.
+    APP_ASSETS_HEAD = ('<link rel="stylesheet" href="/app-assets/manage.css">'
+                       "<script>(function(){if(/^https?:$/.test(location.protocol)){"
+                       "var d=document.documentElement;d.classList.add('app-pending');"
+                       "setTimeout(function(){d.classList.remove('app-pending');},2500);}})();</script>")
+    APP_ASSETS_BODY = '<script src="/app-assets/manage.js" defer></script>'
 
     def _page_shell(self, page_title, active_file, subtitle, body_html, with_filter=False):
         """Wrap a page body in the shared shell (head, header, nav, footer)."""
@@ -1690,7 +1822,8 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             '<meta name="viewport" content="width=device-width, initial-scale=1.0">'
             + theme_head_js +
             self._FAVICON +
-            f'<title>{page_title}</title>' + self._dashboard_css() + '</head><body>'
+            f'<title>{page_title}</title>' + self._dashboard_css() + self.APP_ASSETS_HEAD
+            + '</head><body>'
             '<div class="container">'
             '<div class="topbar">'
             '<div class="header"><h1>🇰🇪 NSE Dashboard</h1>'
@@ -1702,7 +1835,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             f'{body_html}'
             '<div class="footer">Generated by Kenyan Stock Analyzer · '
             'Click any stock symbol for its full individual report</div>'
-            '</div><div id="hovertip"></div>' + js + '</body></html>'
+            '</div><div id="hovertip"></div>' + js + self.APP_ASSETS_BODY + '</body></html>'
         )
 
     @staticmethod
@@ -3623,7 +3756,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         # ---------- how to add a purchase (repeated here for convenience) ----------
         parts.append(
-            '<details class="section-details"><summary>'
+            '<details class="section-details no-app-only"><summary>'
             '<h2>➕ Add a New Purchase</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
             '<p class="page-intro">Every time you buy — even more of a stock you already hold — add one '
@@ -4036,7 +4169,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         # ---------- how to add a bond (repeated here for convenience) ----------
         parts.append(
-            '<details class="section-details"><summary>'
+            '<details class="section-details no-app-only"><summary>'
             '<h2>➕ Add a New Bond</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
             '<p class="page-intro">Every time you buy a new bond, or top up an existing one, add one row '
@@ -4253,7 +4386,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 rows += (
                     f'<tr data-tip="{tip}" style="opacity:0.55;">'
                     f'<td><a href="{link}" class="stock-link">'
-                    f'{self._ticker_logo_html(h["symbol"], website=h.get("website"))}'
+                    f'{self._ticker_logo_html(h["symbol"], website=h.get("website"), international=True)}'
                     f'<strong>{h["symbol"]}</strong></a></td>'
                     f'<td>{h["quantity"]:,.0f}</td><td>{h["avg_cost"]:.2f}</td>'
                     '<td colspan="8" style="color:#dc2626;">No live data today — see warning above</td></tr>')
@@ -4266,7 +4399,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             sc_html = f'<span class="score {sc_cls} hint">{sc}</span>' if sc is not None else '—'
             rows += (
                 f'<tr data-tip="{tip}">'
-                f'<td><a href="{link}" class="stock-link">{self._ticker_logo_html(h["symbol"], website=h.get("website"))}'
+                f'<td><a href="{link}" class="stock-link">{self._ticker_logo_html(h["symbol"], website=h.get("website"), international=True)}'
                 f'<strong>{h["symbol"]}</strong></a> '
                 f'<span style="color:#94a3b8;font-size:0.75rem;">{h["name"]}</span></td>'
                 f'<td>{h["quantity"]:,.0f}</td>'
@@ -4300,7 +4433,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 continue
             dy_txt = f"{h['dividend_yield']:.2f}%" if h.get('dividend_yield') is not None else '—'
             div_rows += (
-                f'<tr><td>{self._ticker_logo_html(h["symbol"], website=h.get("website"))}<strong>{h["symbol"]}</strong></td>'
+                f'<tr><td>{self._ticker_logo_html(h["symbol"], website=h.get("website"), international=True)}<strong>{h["symbol"]}</strong></td>'
                 f'<td>${h["dividend_rate"]:.2f}/share/yr</td>'
                 f'<td>{dy_txt}</td>'
                 f'<td>${(h.get("est_annual_dividend") or 0):,.0f}/yr</td></tr>')
@@ -4342,7 +4475,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 'companies. Try again next run.</p></div></details>')
 
         parts.append(
-            '<details class="section-details"><summary>'
+            '<details class="section-details no-app-only"><summary>'
             '<h2>➕ Add a New International Position</h2><span class="toggle-hint"></span></summary>'
             '<div class="details-body">'
             '<p class="page-intro">Every time you buy — even more of a stock you already hold — add one '
@@ -4373,11 +4506,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         Every piece of data from the old single page is preserved, just moved
         to a related page. Writes all pages and returns the index.html path.
         """
-        now = datetime.now().strftime('%Y-%m-%d %H:%M EAT')
-        data_date_str = data_date or datetime.now().strftime('%Y-%m-%d')
-        fx = f" · 💵 USD/KES {usd_kes['rate']:.2f}" if (usd_kes and usd_kes.get('rate')) else ""
-        subtitle = (f"{now} · {total} stocks · 📅 {data_date_str} · "
-                    f"Prices: NSE official close · Fundamentals: TradingView{fx}")
+        subtitle = self.page_subtitle(total=total, data_date=data_date, usd_kes=usd_kes)
 
         pv_marker = {
             'ok': ('✓', '#16a34a', 'Verified against independent source'),
@@ -4410,12 +4539,16 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             # data-tip → hover the score to see how it was built (factor breakdown)
             return f'<td data-tip="{self._stock_tip(s)}"><span class="score {c} hint">{sc}</span></td>'
 
-        def sym_td(s):
+        def sym_td(s, star=False):
             link = s['report_file'] if s['report_file'] else '#'
+            # ☆ = add to the watchlist (only shown when the dashboard app is running)
+            star_html = (f'<button type="button" class="wl-star app-only" data-symbol="{s["symbol"]}" '
+                         f'data-market="NSE" data-name="{escape(s.get("name") or s["symbol"], quote=True)}" '
+                         f'title="Add {s["symbol"]} to your watchlist">☆</button>') if star else ''
             # data-tip → hover any symbol for a quick preview (price, signal, score)
             return (f'<td data-tip="{self._stock_tip(s)}">'
                     f'<a href="{link}" class="stock-link">{self._ticker_logo_html(s["symbol"])}'
-                    f'<strong>{s["symbol"]}</strong></a></td>')
+                    f'<strong>{s["symbol"]}</strong></a>{star_html}</td>')
 
         # ---- Market pulse stats (shared on Overview) ----
         breadth_html = ''
@@ -4452,7 +4585,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
 
         # ---- OVERVIEW page: critical Buy/Sell + price + change + score ----
         ov_rows = ''.join(
-            f'<tr>{sym_td(s)}{signal_td(s)}<td>{price_cell(s)}</td>{change_td(s)}{score_td(s)}</tr>'
+            f'<tr>{sym_td(s, star=True)}{signal_td(s)}<td>{price_cell(s)}</td>{change_td(s)}{score_td(s)}</tr>'
             for s in stocks)
         # The charts live on their own Visuals tab now (Overview stays lean).
         visuals_body = self._build_visuals_body(stocks)
@@ -4787,9 +4920,18 @@ details.section-details > .details-body { padding: 0 20px 20px; }
         # (most important, zero scrolling), then each full section — all
         # three live on this one private page, per the same never-committed
         # portfolio/ directory discipline.
+        # The "➕ Record a purchase" form and the "📝 Your entries" list are
+        # drawn into these two placeholders by the dashboard app (manage.js);
+        # without the app, a short note says how to get them.
         portfolio_body = (
-            self._build_networth_glance(portfolio_summary, bond_portfolio,
-                                        intl_portfolio_summary=intl_portfolio_summary, usd_kes=usd_kes)
+            '<div class="banner banner-info no-app-only">➕ <b>Recording a purchase is easiest with the '
+            'dashboard app:</b> double-click <b>Open Dashboard.command</b> in the project folder (or run '
+            '<code>./venv/bin/python3 app.py</code>) and this page gets a <b>Record a purchase</b> form — '
+            'search for the stock, type what you paid, done. You can still add rows to the CSV files '
+            'described below.</div>'
+            '<div id="purchase-panel" class="section app-only"></div>'
+            + self._build_networth_glance(portfolio_summary, bond_portfolio,
+                                          intl_portfolio_summary=intl_portfolio_summary, usd_kes=usd_kes)
             + self._build_portfolio_body(
                 portfolio_summary, history_rows=portfolio_history, news=portfolio_news,
                 history_tracker=portfolio_history_tracker, bond_portfolio=bond_portfolio,
@@ -4799,6 +4941,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
                 intl_portfolio_summary, history_rows=intl_portfolio_history, news=intl_portfolio_news,
                 history_tracker=intl_portfolio_history_tracker,
             )
+            + '<div id="entries-panel" class="section app-only"></div>'
         )
 
         # ---- Assemble & write all pages ----
@@ -4817,8 +4960,7 @@ details.section-details > .details-body { padding: 0 20px 20px; }
             'quality.html': self._page_shell('NSE — Data Quality', 'quality.html', subtitle, quality_body),
         }
         for filename, html in pages.items():
-            with open(os.path.join(self.output_dir, filename), 'w', encoding='utf-8') as f:
-                f.write(html)
+            self.write_page(filename, html)
         logger.info(f"Dashboard saved: {len(pages)} pages — {', '.join(pages.keys())}")
         return os.path.join(self.output_dir, 'index.html')
 
@@ -5345,6 +5487,9 @@ function filterTable() {{
             pdf_path = os.path.join(
                 self.output_dir, f"{prefix}_{self.timestamp}.pdf"
             )
+            # The dashboard-app stylesheet only exists when served by app.py — a
+            # PDF never needs it (and WeasyPrint would warn it can't resolve it).
+            html_content = html_content.replace('<link rel="stylesheet" href="/app-assets/manage.css">', '')
             HTML(string=html_content).write_pdf(pdf_path)
             logger.info(f"Saved PDF: {pdf_path}")
             return pdf_path

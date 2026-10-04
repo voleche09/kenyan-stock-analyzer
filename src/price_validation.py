@@ -110,6 +110,22 @@ class PriceValidator:
 
         return self._reference
 
+    def load_cached_reference(self):
+        """
+        Today's reference board as saved by the last successful
+        fetch_reference_prices() (i.e. the last full pipeline run), without
+        touching the network — for quick partial rebuilds such as the
+        watchlist page, which must not stall on a slow or unreachable source.
+        Returns {} if nothing has been saved today.
+        """
+        path = self._cache_path()
+        try:
+            with open(path) as f:
+                self._reference = json.load(f) or {}
+        except (OSError, ValueError):
+            self._reference = {}
+        return self._reference
+
     @staticmethod
     def _parse_afx(html):
         """

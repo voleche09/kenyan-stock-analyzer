@@ -158,12 +158,26 @@ def main():
     except Exception as e:
         logger.warning(f"Portfolio tracking skipped: {e}")
 
+    # ---- ⭐ Watchlist section: your own watchlist's NSE stocks (private —
+    # portfolio/watchlist.csv) when you have one; STOCK_SYMBOLS otherwise.
+    # Also absent on a fresh GitHub Actions checkout, so CI is unchanged.
+    email_watchlist = config.stock_symbols
+    try:
+        import watchlist as watchlist_mod
+        mine = [e['symbol'] for e in watchlist_mod.load_watchlist(config.portfolio_dir,
+                                                                  nse_symbols=set(fundamentals_data))
+                if e['market'] == watchlist_mod.MARKET_NSE]
+        if mine:
+            email_watchlist = mine
+    except Exception as e:
+        logger.warning(f"Watchlist skipped: {e}")
+
     # ---- Build the summary PDF ----
     logger.info("Building summary PDF...")
     result = report_gen.generate_summary(
         analysis_results, fundamentals_data=fundamentals_data, validations=validations,
         scores=scores, alerts=alerts, breadth=breadth, sector_data=sector_data,
-        usd_kes=usd_kes, watchlist=config.stock_symbols, report_type='both',
+        usd_kes=usd_kes, watchlist=email_watchlist, report_type='both',
         portfolio_summary=portfolio_summary,
     )
     # result is (html, pdf) for report_type='both', or a single path
