@@ -1578,21 +1578,21 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             nse_history=last_closes(nse_results, portfolio_summary),
             intl_history=last_closes(intl_results, intl_portfolio_summary))
 
-        # ---- Assemble & write all pages ----
+        # ---- Assemble & write all pages (each shows its sidebar label as its title) ----
         pages = {
-            'index.html': self._page_shell('NSE Dashboard — Overview', 'index.html', subtitle, overview_body, private=bool(networth)),
-            'portfolio.html': self._page_shell('NSE — My Portfolio', 'portfolio.html', subtitle, portfolio_body),
-            'visuals.html': self._page_shell('NSE — Visuals', 'visuals.html', subtitle, visuals_body),
-            'technicals.html': self._page_shell('NSE — Technicals', 'technicals.html', subtitle, technicals_body),
-            'fundamentals.html': self._page_shell('NSE — Fundamentals', 'fundamentals.html', subtitle,
+            'index.html': self._page_shell('Overview', 'index.html', subtitle, overview_body, private=bool(networth)),
+            'portfolio.html': self._page_shell('My Portfolio', 'portfolio.html', subtitle, portfolio_body),
+            'visuals.html': self._page_shell('Market map', 'visuals.html', subtitle, visuals_body),
+            'technicals.html': self._page_shell('Technicals', 'technicals.html', subtitle, technicals_body),
+            'fundamentals.html': self._page_shell('Fundamentals', 'fundamentals.html', subtitle,
                                                   fundamentals_body),
-            'dividends.html': self._page_shell('NSE — Dividends', 'dividends.html', subtitle, dividends_body),
-            'earnings.html': self._page_shell('NSE — Next Earnings', 'earnings.html', subtitle, earnings_body),
-            'sectors.html': self._page_shell('NSE — Sectors', 'sectors.html', subtitle, sectors_body),
-            'foreign.html': self._page_shell('NSE — Foreign Flows', 'foreign.html', subtitle, foreign_body),
-            'pulse.html': self._page_shell('NSE — Market Pulse', 'pulse.html', subtitle, pulse_body),
-            'bonds.html': self._page_shell('NSE — Government Bonds', 'bonds.html', subtitle, bonds_body),
-            'quality.html': self._page_shell('NSE — Data Quality', 'quality.html', subtitle, quality_body),
+            'dividends.html': self._page_shell('Dividends', 'dividends.html', subtitle, dividends_body),
+            'earnings.html': self._page_shell('Next earnings', 'earnings.html', subtitle, earnings_body),
+            'sectors.html': self._page_shell('Sectors', 'sectors.html', subtitle, sectors_body),
+            'foreign.html': self._page_shell('Foreign flows', 'foreign.html', subtitle, foreign_body),
+            'pulse.html': self._page_shell('Market pulse', 'pulse.html', subtitle, pulse_body),
+            'bonds.html': self._page_shell('Govt bonds', 'bonds.html', subtitle, bonds_body),
+            'quality.html': self._page_shell('Data quality', 'quality.html', subtitle, quality_body),
         }
         for filename, html in pages.items():
             self.write_page(filename, html)

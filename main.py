@@ -60,7 +60,7 @@ def watchlist_count(portfolio_dir):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Kenyan Stock Analyzer — NSE Daily Dashboard'
+        description='Kenyan Stock Analyzer — Finances Dashboard'
     )
     parser.add_argument('--date', type=str, help='Analysis date (YYYY-MM-DD)')
     parser.add_argument('--period', type=str, default='6mo',
