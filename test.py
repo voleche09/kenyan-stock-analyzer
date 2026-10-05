@@ -8,6 +8,7 @@ sector analysis, email notifier, and config loading.
 
 import sys
 import os
+import re
 import json
 import unittest
 import tempfile
@@ -26,6 +27,8 @@ import portfolio_csv
 import portfolio as portfolio_mod
 import international_portfolio
 import bonds_portfolio
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tools'))
+import fake_bonds  # made-up bonds: the tests never name anyone's real ones
 
 # Quiet logging during tests
 import logging
@@ -283,6 +286,7 @@ class TestPortfolioCsv(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
+        self.enterContext(fake_bonds.use())
 
     def tearDown(self):
         self._tmp.cleanup()
@@ -497,16 +501,16 @@ class TestPortfolioCsv(unittest.TestCase):
 
     def test_add_bond_appends_to_the_csv_and_canonicalises_the_issue(self):
         path = self.write("bonds.csv", "issue,face_value,purchase_price_pct,purchase_date,note\n")
-        bonds = bonds_portfolio.add_bond(self.dir, "fdx1/2022/025", 250000, 100.0, None, "")
+        bonds = bonds_portfolio.add_bond(self.dir, "fdx9/2020/020", 250000, 100.0, None, "")
         with open(path, encoding="utf-8", newline="") as f:
-            self.assertEqual(f.read().splitlines()[-1], "FXD1/2022/025,250000,100,,")
-        self.assertEqual([b["issue"] for b in bonds], ["FXD1/2022/025"])
+            self.assertEqual(f.read().splitlines()[-1], "FXD9/2020/020,250000,100,,")
+        self.assertEqual([b["issue"] for b in bonds], ["FXD9/2020/020"])
         self.assertEqual([f for f in os.listdir(self.dir) if f.endswith(".json")], [])
 
     def test_add_bond_without_a_price_column_is_fine_because_par_is_the_default(self):
         self.write("bonds.csv", "issue,face_value\n")
         with mock.patch.object(bonds_portfolio.logger, "warning") as warn:
-            bonds = bonds_portfolio.add_bond(self.dir, "IFB1/2023/6.5", 150000)      # price defaults to par
+            bonds = bonds_portfolio.add_bond(self.dir, "IFB9/2021/7", 150000)      # price defaults to par
         self.assertFalse(warn.called)
         self.assertEqual(bonds[0]["purchase_price_pct"], 100.0)
 
@@ -526,7 +530,7 @@ class TestPortfolioCsv(unittest.TestCase):
         self.assertEqual(portfolio_mod.load_holdings(self.dir),
                          [{"symbol": "A", "quantity": 3.0, "buy_price": 4.5,
                            "buy_date": "2026-01-02", "note": "x"}])
-        bonds_portfolio.add_bond(self.dir, "ifb1/2023/6.5", 50000)
+        bonds_portfolio.add_bond(self.dir, "ifb9/2021/7", 50000)
         international_portfolio.add_lot(self.dir, "msft", 5, 410)
         self.assertTrue(os.path.exists(os.path.join(self.dir, "bonds.csv")))
         self.assertTrue(os.path.exists(os.path.join(self.dir, "international_holdings.csv")))
@@ -545,15 +549,28 @@ class TestPortfolioCsv(unittest.TestCase):
     def test_bonds_csv_aliases_defaults_and_downstream_compatibility(self):
         self.write("bonds.csv",
                    'Bond,Face Value,Purchase Price Pct,Purchase Date,Note\n'
-                   'FDX1/2022/025,"250,000",100,2022-09-23,typo alias\n'   # FDX -> FXD
-                   'IFB1/2023/6.5,150000,,,\n')                             # blank -> par
+                   'FDX9/2020/020,"250,000",100,2023-03-15,typo alias\n'   # FDX -> FXD
+                   'IFB9/2021/7,150000,,,\n')                             # blank -> par
         bonds = bonds_portfolio.load_bonds(self.dir)
-        self.assertEqual([b["issue"] for b in bonds], ["FXD1/2022/025", "IFB1/2023/6.5"])
+        self.assertEqual([b["issue"] for b in bonds], ["FXD9/2020/020", "IFB9/2021/7"])
         self.assertEqual(bonds[0]["face_value"], 250000.0)
         self.assertEqual(bonds[1]["purchase_price_pct"], 100.0)
         self.assertIsNone(bonds[1]["purchase_date"])
         summary = bonds_portfolio.compute_bond_portfolio(bonds)
         self.assertEqual(summary["totals"]["n_available"], 2)
+
+    def test_extra_reference_terms_load_from_a_file(self):
+        """BOND_REFERENCE_EXTRA (sandbox runs): made-up bonds join the table."""
+        path = os.path.join(self.dir, "extra.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({"ifb9/2019/9": dict(fake_bonds.FAKE_BOND_REFERENCE["IFB9/2021/7"])}, f)
+        with mock.patch.dict(bonds_portfolio.BOND_REFERENCE):
+            self.assertEqual(bonds_portfolio.load_extra_reference(path), 1)
+            self.assertIn("IFB9/2019/9", bonds_portfolio.BOND_REFERENCE)      # canonical (upper case)
+        self.assertNotIn("IFB9/2019/9", bonds_portfolio.BOND_REFERENCE)
+        with mock.patch.object(bonds_portfolio.logger, "warning") as warn:
+            self.assertEqual(bonds_portfolio.load_extra_reference(os.path.join(self.dir, "missing.json")), 0)
+        self.assertTrue(warn.called)
 
     # ---- the shipped templates ----
 
@@ -1019,9 +1036,62 @@ class TestWatchlistPage(_NoLogos, unittest.TestCase):
         self.assertEqual(info["count"], 0)
         page = self.html()
         self.assertIn("Your watchlist is empty", page)
-        self.assertIn('href="watchlist.html" class="nav-item active">⭐ Watchlist', page)
-        self.assertIn('id="wl-add-panel" class="section app-only"', page)
+        self.assertIn('href="watchlist.html" class="nav-item active" aria-current="page"', page)
+        self.assertIn("<span>Watchlist</span>", page)
+        self.assertRegex(page, r'id="wl-add-panel" class="[^"]*app-only')
         self.assertIn("Open Dashboard.command", page)
+
+    def test_page_keeps_every_hook_the_app_script_uses(self):
+        """app_assets/manage.js finds its way around this page by structure:
+        the add panel, the status-pill slot, each Edit/Remove button's own
+        card (whose id it rebuilds with anchorFor()) and each table row's
+        link to that card. A redesign must keep all of them."""
+        from bs4 import BeautifulSoup
+        self.build_three_card_page()
+        page = self.html()
+        soup = BeautifulSoup(page, "html.parser")
+
+        def anchor_for(symbol, market):          # the same rule as manage.js's anchorFor()
+            return "wl-" + re.sub(r"[^A-Za-z0-9_.-]", "_", f"{symbol}-{market}")
+
+        self.assertEqual(len(soup.select("#wl-add-panel")), 1)
+        self.assertEqual(len(soup.select(".header-actions")), 1)
+        ids = [el["id"] for el in soup.select("[id]")]
+        self.assertEqual(len(ids), len(set(ids)), "duplicate ids")
+        buttons = soup.select(".wl-btn[data-wl-action]")
+        self.assertEqual(len(buttons), 6)                      # edit + remove on each of 3 cards
+        for b in buttons:
+            card = b.find_parent(class_="wl-card")
+            self.assertIsNotNone(card, "button outside its card")
+            self.assertEqual(card.get("id"), anchor_for(b["data-symbol"], b["data-market"]))
+        for card in soup.select(".wl-card[id]"):
+            links = soup.select(f'tr a[href="#{card["id"]}"]')
+            self.assertTrue(links, f"no table row links to {card['id']}")
+
+    def build_three_card_page(self):
+        with open(os.path.join(self.cfg.portfolio_dir, "watchlist.csv"), "w") as f:
+            f.write("symbol,market,buy_below,sell_above,note,added,added_price\n"
+                    'EQTY,NSE,1,1000,"<script>alert(1)</script> & co",,\n'
+                    "AAPL,INTL,,,,,\n"
+                    "GONE,INTL,,,,,\n")
+        nse_res, intl_res = _analysed(seed=1), _analysed(seed=2)
+        fund = {"name": "Equity Group & Co", "sector": "Finance", "pe_ratio": 5, "price_52w_high": 500,
+                "price_52w_low": 1, "_data_date": "2026-10-03"}
+        guard = mock.patch.multiple(international_data, fetch_dividend_history=mock.DEFAULT,
+                                    fetch_earnings_calendar=mock.DEFAULT, fetch_history=mock.DEFAULT,
+                                    fetch_fundamentals=mock.DEFAULT)
+        with guard as fakes:
+            fakes["fetch_dividend_history"].return_value = []
+            fakes["fetch_earnings_calendar"].return_value = {}
+            fakes["fetch_history"].return_value = None
+            fakes["fetch_fundamentals"].return_value = {}
+            return self.generate({
+                "fundamentals": {"EQTY": fund}, "nse_results": {"EQTY": nse_res},
+                "intl_results": {"AAPL": intl_res},
+                "intl_fundamentals": {"AAPL": {"name": "Apple Inc.", "currency": "USD", "website": None}},
+                "nse_lots": [], "intl_lots": [{"symbol": "AAPL", "quantity": 10, "buy_price": 190.25}],
+                "usd_kes": None, "sector_medians": {"Finance": {"pe_ratio": 7}},
+            })
 
     def test_cards_built_from_preloaded_data_without_any_network(self):
         with open(os.path.join(self.cfg.portfolio_dir, "watchlist.csv"), "w") as f:
@@ -1052,8 +1122,8 @@ class TestWatchlistPage(_NoLogos, unittest.TestCase):
         self.assertNotIn("<script>alert(1)</script>", page)
         self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt; &amp; co", page)
         self.assertIn("Equity Group &amp; Co", page)
-        self.assertEqual(page.count('class="section wl-card"'), 3)
-        self.assertEqual(page.count('class="chart-img"'), 2)
+        self.assertEqual(page.count('<article class="wl-card"'), 3)
+        self.assertEqual(len(re.findall(r'<figure class="chart" id="c-wl-', page)), 2)   # SVG price charts
         self.assertIn("You own 10 shares", page)
         self.assertIn("No price data for <b>GONE</b>", page)
         # Each stock with data got a full page, linked from its card
@@ -1538,6 +1608,250 @@ class TestUpdateJobs(unittest.TestCase):
 import time  # noqa: E402  (used by TestUpdateJobs)
 
 
+_BOND_COUNT_WORDS = (r"(?:one|two|three|four|five|six|seven|eight|nine|ten|"
+                     r"eleven|twelve|\d+)")
+# Sentences that describe a specific person's holdings ("Three of your four
+# bonds…", "written for exactly the four bonds you hold"). These must only
+# ever be generated from the private portfolio files at runtime.
+_HOLDING_SENTENCE = re.compile(
+    rf"\b{_BOND_COUNT_WORDS}\s+of\s+your\s+{_BOND_COUNT_WORDS}\s+(?:bonds|stocks|holdings)\b"
+    rf"|\bexactly\s+the\s+{_BOND_COUNT_WORDS}\s+(?:bonds?|stocks?|holdings?)\s+you\s+(?:hold|own)\b",
+    re.IGNORECASE)
+# Python joins adjacent string literals ('… four '\n    'bonds …'), so a
+# sentence in source code is usually split across lines and quotes.
+_LITERAL_JOIN = re.compile(r"""['"]\s*\n\s*(?:[rRfFbBuU]{1,2})?['"]""")
+
+
+def _holding_sentences(text):
+    """Line numbers of holding-specific sentences in `text`, with split
+    string literals joined back together first."""
+    pieces, segments, pos, flat_len = [], [], 0, 0   # segments: (start in flat, start in text)
+    for m in list(_LITERAL_JOIN.finditer(text)) + [None]:
+        end = m.start() if m else len(text)
+        segments.append((flat_len, pos))
+        pieces.append(text[pos:end])
+        flat_len += end - pos
+        pos = m.end() if m else pos
+    flat = "".join(pieces)
+
+    def line_of(i):
+        flat_start, text_start = max(s for s in segments if s[0] <= i)
+        return text.count("\n", 0, text_start + (i - flat_start)) + 1
+    return [line_of(m.start()) for m in _HOLDING_SENTENCE.finditer(flat)]
+
+
+def _tracked_text_files(root):
+    """(relative path, text) for every git-tracked text file, or None when git
+    isn't available."""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True,
+                             check=True).stdout.decode("utf-8", "replace")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    files = []
+    for rel in filter(None, out.split("\0")):
+        try:
+            with open(os.path.join(root, rel), encoding="utf-8") as f:
+                files.append((rel, f.read()))
+        except (UnicodeDecodeError, OSError):
+            continue                      # binary or unreadable — not source text
+    return files
+
+
+def _bond_pairs_in(files, lots, window=40):
+    """Lines (as "path:line") where one of `lots`' issues and that same
+    lot's face value appear within `window` lines of each other. Returns
+    locations only — never the values — so a failure can be shown safely."""
+    variants = {}
+    for lot in lots:
+        canon = lot["issue"]
+        names = {canon} | {a for a, c in bonds_portfolio._ALIASES.items() if c == canon}
+        face = float(lot["face_value"])
+        amounts = {f"{face:,.0f}", f"{face:.0f}"}
+        variants.setdefault(canon, (names, set()))[1].update(amounts)
+    hits = []
+    for rel, text in files:
+        lines = text.splitlines()
+        for names, amounts in variants.values():
+            name_lines = [i for i, ln in enumerate(lines) if any(n in ln for n in names)]
+            if not name_lines:
+                continue
+            amount_re = re.compile(r"(?<![\d,.])(?:" + "|".join(re.escape(a) for a in amounts)
+                                   + r")(?![\d,])")
+            for i, ln in enumerate(lines):
+                if amount_re.search(ln) and any(abs(i - j) <= window for j in name_lines):
+                    hits.append(f"{rel}:{i + 1}")
+    return sorted(set(hits))
+
+
+class TestBondsExplainerPrivacy(unittest.TestCase):
+    """The "📘 Understanding Your Bonds" explainer is worked out from the
+    bonds being shown. Nothing about a real holding may live in the source —
+    the repository is public."""
+
+    AS_OF = "2026-01-15"
+    ROOT = os.path.dirname(os.path.abspath(__file__))
+
+    def setUp(self):
+        self.enterContext(fake_bonds.use())
+
+    def explainer(self, lots):
+        from report_generator import ReportGenerator
+        pf = bonds_portfolio.compute_bond_portfolio(lots, as_of=self.AS_OF)
+        return ReportGenerator._bonds_explainer_facts(
+            [b for b in pf["bonds"] if b["data_available"]])
+
+    @staticmethod
+    def lot(issue, face):
+        return {"issue": issue, "face_value": face, "purchase_price_pct": 100.0,
+                "purchase_date": "2024-03-01", "note": ""}
+
+    def test_the_explainer_follows_the_portfolio_it_is_given(self):
+        a = self.explainer([self.lot("IFB9/2020/15", 120000.0), self.lot("FXD9/2020/020", 340000.0)])
+        b = self.explainer([self.lot("IFB9/2021/7", 760000.0)])
+
+        self.assertIn("exactly the two bonds you hold", a)
+        self.assertIn("One of your two bonds is an IFB.", a)
+        self.assertIn("Your FXD9/2020/020 is a standard taxable Treasury bond.", a)
+        self.assertIn("FXD9/2020/020 10%", a)
+        self.assertIn("full KES 340,000 back only at maturity in 2040", a)
+        self.assertIn("the single biggest finding here", a)        # the small-holder rule applies…
+        self.assertIn("Your holding (KES 120,000) is well under that threshold", a)
+
+        self.assertIn("exactly the one bond you hold", b)
+        self.assertIn("Your bond is an IFB.", b)
+        self.assertIn("None of your bonds is taxed.", b)
+        self.assertIn("Your IFB9/2021/7 repays principal in tranches", b)
+        self.assertIn("None of your current bonds qualifies", b)   # …and here it doesn't
+        for from_a in ("FXD9/2020/020", "340,000", "120,000", "two bonds", "biggest finding"):
+            self.assertNotIn(from_a, b)
+
+    def test_several_small_holder_bonds_read_naturally(self):
+        out = self.explainer([self.lot("IFB9/2020/15", 70000.0), self.lot("IFB9/2022/11", 70000.0)])
+        self.assertIn("Both of your bonds are IFBs.", out)
+        self.assertIn("both state", out)
+        self.assertIn("(KES 70,000 each)", out)
+        self.assertIn("None of your bonds is taxed.", out)
+
+    def test_names_from_the_file_are_escaped(self):
+        from report_generator import ReportGenerator
+        out = ReportGenerator._bonds_explainer_facts([{
+            "issue": "<b>X</b>", "type": "FXD", "tax_free": False, "withholding_pct": 10.0,
+            "small_holder_accelerated": False, "redemption_structure": [{}],
+            "face_value": 1000.0, "legal_maturity_date": "2040-01-01"}])
+        self.assertNotIn("<b>X</b>", out)
+        self.assertIn("&lt;b&gt;X&lt;/b&gt;", out)
+
+    def test_no_tracked_file_describes_specific_holdings(self):
+        files = _tracked_text_files(self.ROOT)
+        if files is None:
+            self.skipTest("git not available")
+        bad = [f"{rel}:{line}"
+               for rel, text in files if not os.path.basename(rel).startswith("test")
+               for line in _holding_sentences(text)]
+        self.assertEqual(bad, [], "holding-specific sentences must be generated at runtime")
+
+    def test_your_real_bonds_are_not_in_any_tracked_file(self):
+        # LOCAL ONLY. Reads your private portfolio/bonds.csv — which is never
+        # committed — and checks no tracked file pairs one of your issues with
+        # its amount. Skipped wherever that file doesn't exist (e.g. CI).
+        # A failure names files and lines only, never the values.
+        path = os.path.join(self.ROOT, "portfolio", "bonds.csv")
+        if not os.path.exists(path):
+            self.skipTest("no private portfolio/bonds.csv on this machine")
+        files = _tracked_text_files(self.ROOT)
+        if files is None:
+            self.skipTest("git not available")
+        lots = bonds_portfolio._load_bonds_csv(path)
+        self.assertEqual(_bond_pairs_in(files, lots), [],
+                         "a tracked file pairs one of your bond issues with its amount")
+
+
+_HOSTILE = '<img src=x onerror="alert(1)">'
+
+
+class TestThirdPartyTextIsEscaped(_NoLogos, unittest.TestCase):
+    """Headlines, company names/summaries and links come from Yahoo, Google
+    News and TradingView. Rendered raw, a booby-trapped headline could run
+    script on a page served by the local app — which can read the app's
+    write token. Every such field must come out as text."""
+
+    def setUp(self):
+        super().setUp()
+        from report_generator import ReportGenerator
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.rg = ReportGenerator(output_dir=self._tmp.name, cache_dir=self._tmp.name)
+        # A template error must fail the test, not quietly become the
+        # fallback page (which would pass these checks for the wrong reason).
+        self._real_fallback = ReportGenerator._fallback_html
+        p = mock.patch.object(ReportGenerator, "_fallback_html",
+                              side_effect=AssertionError("template failed to render"))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def read(self, path):
+        with open(path, encoding="utf-8") as f:
+            return f.read()
+
+    def assertNoRawMarkup(self, html):
+        self.assertNotIn(_HOSTILE, html)
+        self.assertNotIn("<script>alert", html)
+        self.assertNotRegex(html, r'href="\s*javascript:')
+
+    def test_international_stock_page(self):
+        fundamentals = {"currency": "USD", "name": "Evil " + _HOSTILE, "sector": _HOSTILE,
+                        "industry": "<script>alert(2)</script>", "summary": "About us " + _HOSTILE}
+        news = [{"title": "Shares soar " + _HOSTILE, "url": "javascript:alert(3)",
+                 "source": "<script>alert(4)</script>", "published_utc": "2026-10-01T09:00:00Z"},
+                {"title": "Plain headline", "url": "https://example.com/a?b=1&c=2",
+                 "source": "Wire", "published_utc": "2026-10-02T09:00:00Z"}]
+        page = self.read(self.rg.generate_international_stock_report(
+            "AAPL", _analysed(seed=4), fundamentals=fundamentals, news=news))
+        self.assertNoRawMarkup(page)
+        self.assertIn("Shares soar &lt;img", page)                 # the headline is kept, as text
+        self.assertIn('href="https://example.com/a?b=1&amp;c=2"', page)
+        self.assertIn("About us &lt;img", page)
+
+    def test_nse_stock_page(self):
+        page = self.read(self.rg.generate_stock_report(
+            "ABSA", _analysed(seed=5), fundamentals={"sector": _HOSTILE, "name": 'A "B" ' + _HOSTILE}))
+        self.assertNoRawMarkup(page)
+        self.assertIn('data-name="A &#34;B&#34; &lt;img', page)
+
+    def test_holding_news_on_the_portfolio_page(self):
+        import page_portfolio
+        card = str(page_portfolio._news_list([{"symbol": "ABSA", "title": _HOSTILE, "url": "javascript:alert(1)",
+                                               "source": _HOSTILE, "published_utc": _HOSTILE}]))
+        self.assertNoRawMarkup(card)
+        self.assertNotIn("<a ", card)                               # bad link -> no link at all
+        ok = str(page_portfolio._news_list([{"symbol": "ABSA", "title": "Fine", "url": "https://x.example/1"}]))
+        self.assertIn('<a href="https://x.example/1"', ok)
+
+    def test_hover_tips_stay_text_after_the_browser_decodes_them(self):
+        from html import unescape          # what getAttribute('data-tip') hands to innerHTML
+        tip = self.rg._stock_tip({"symbol": "ABSA" + _HOSTILE, "sector": _HOSTILE, "price": 10.0,
+                                  "change": 1.0, "signal_label": _HOSTILE,
+                                  "score_detail": {"overall": 50, "reasons": {"value": [_HOSTILE]}}})
+        self.assertNotIn("<img", unescape(tip))
+        self.assertIn("&lt;img", unescape(tip))
+
+    def test_a_failed_template_does_not_echo_raw_data(self):
+        page = self._real_fallback(self.rg, "x.html", {"news": [{"title": _HOSTILE}]})
+        self.assertNotIn("<img", page)
+        self.assertIn("&lt;img", page)
+
+    def test_only_web_links_survive_the_international_news_fetch(self):
+        import international_data
+        items = [{"symbol": "AAPL", "title": "a", "url": "javascript:alert(1)", "source": "", "published_utc": ""},
+                 {"symbol": "AAPL", "title": "b", "url": " HTTPS://ok.example/x", "source": "", "published_utc": ""}]
+        with mock.patch.object(international_data, "_from_yfinance_news", return_value=items), \
+                mock.patch.object(international_data, "_from_google_news_rss", return_value=[]):
+            got = international_data.fetch_news("AAPL")
+        self.assertEqual([n["title"] for n in got], ["b"])
+
+
 def run_tests():
     """Run all tests and print results."""
     print("=" * 60)
@@ -1545,23 +1859,12 @@ def run_tests():
     print("=" * 60)
     print()
 
-    # Create test suite
+    # Every TestCase in this file, plus any test_*.py module beside it, runs
+    # automatically — a hand-written list used to skip new classes silently.
     loader = unittest.TestLoader()
-    suite = unittest.TestSuite()
-    suite.addTests(loader.loadTestsFromTestCase(TestConfig))
-    suite.addTests(loader.loadTestsFromTestCase(TestUtils))
-    suite.addTests(loader.loadTestsFromTestCase(TestAnalysisEngine))
-    suite.addTests(loader.loadTestsFromTestCase(TestSectorAnalysis))
-    suite.addTests(loader.loadTestsFromTestCase(TestReportGenerator))
-    suite.addTests(loader.loadTestsFromTestCase(TestEmailNotifier))
-    suite.addTests(loader.loadTestsFromTestCase(TestPortfolioCsv))
-    suite.addTests(loader.loadTestsFromTestCase(TestCsvRowEdits))
-    suite.addTests(loader.loadTestsFromTestCase(TestWatchlistStorage))
-    suite.addTests(loader.loadTestsFromTestCase(TestWatchlistSignals))
-    suite.addTests(loader.loadTestsFromTestCase(TestWatchlistPage))
-    suite.addTests(loader.loadTestsFromTestCase(TestSymbolLookup))
-    suite.addTests(loader.loadTestsFromTestCase(TestDashboardApp))
-    suite.addTests(loader.loadTestsFromTestCase(TestUpdateJobs))
+    suite = loader.loadTestsFromModule(sys.modules[__name__])
+    here = os.path.dirname(os.path.abspath(__file__))
+    suite.addTests(loader.discover(here, pattern="test_*.py", top_level_dir=here))
 
     # Run
     runner = unittest.TextTestRunner(verbosity=2)

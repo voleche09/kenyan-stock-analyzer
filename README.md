@@ -9,8 +9,10 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **All 57 NSE stocks** analyzed daily — not just a watchlist
 - **Fundamental analysis** — P/E, PEG, ROE, ROIC, operating/net margins, debt ratios, revenue/EPS growth, market cap, and more
 - **Technical analysis** — RSI, MACD, Bollinger Bands, SMA/EMA crossovers, Stochastic, ATR, OBV, support/resistance levels
-- **6 charts per stock** — price+SMA+Bollinger, RSI, MACD, volume, stochastic, ATR
-- **Plain-English explanations** — every metric explained in simple terms (e.g. "RSI above 70 = overbought, price may pull back")
+- **Interactive charts on every stock's page** — the price with its 20/50-day averages and Bollinger band (1M / 3M / 6M / full-history views; hover or touch for exact values), plus volume, RSI, MACD, stochastic and ATR
+- **A modern, readable design** — every page shares one layout with a sidebar; the most important figures come first and tabs replace long scrolling; light and dark mode (follows your device, or toggle it); works on a phone, tablet or computer
+- **Plain-English explanations** — an ⓘ next to every figure explains it in simple terms (e.g. "RSI above 70 = overbought, price may pull back"), plus a glossary on each page
+- **👁 Hide amounts** — one click blurs every figure about your own money on screen (handy when someone's looking over your shoulder)
 - **Similar stocks** — peer comparison by sector, market cap, and valuation
 - **Sector performance** — sector-by-sector breakdown with average returns
 - **Market breadth** — advance/decline, % above SMA50, bullish MACD ratio
@@ -104,8 +106,8 @@ For stocks you're keeping an eye on but haven't bought (or want to time) — Ken
 - Or click the **☆** next to any stock on the 🏠 Overview, or **☆ Watch** at the top of any stock's page.
 - **✏️ Edit targets / note** and **🗑 Remove** (with Undo) are on every card.
 
-**What the page shows** — for every stock:
-- a chart of the last six months with the 20- and 50-day averages, the normal-range band, **your buy/sell prices** and the 52-week high/low, plus volume and RSI underneath;
+**What the page shows** — the whole list on one screen as compact cards (price, today's move, a six-month trend line with your targets, where the price sits between them, the signal tally), sortable and filterable, with a table view too. Click a card and it opens in place with everything for that stock:
+- an interactive chart of the last six months (1M / 3M / 6M views; hover for exact values) with the 20- and 50-day averages, the normal-range band, **your buy/sell prices** and the 52-week high/low, plus volume and RSI underneath;
 - a **signal checklist** in plain English — trend, moving averages, momentum (MACD), RSI, valuation (P/E vs the stock's sector for NSE; PEG / forward P/E abroad), what analysts say, dividend, the 0–100 factor score, liquidity — each marked 🟢 leans positive, 🔴 leans negative or ⚪ neutral, with a tally ("Mostly positive / Mixed / Mostly negative");
 - where the price sits against **your targets**, "since you started watching", 1W–1Y performance, key numbers, next earnings and ex-dividend dates, the latest headlines, and "💼 You own N shares" if you already hold it;
 - a **🔔 Needs your attention today** list across all your stocks: a target reached, near a 52-week high/low, a ±5% day, oversold/overbought, a fresh crossover, earnings this week, an ex-dividend date coming up, or a ticker with no data.
@@ -425,7 +427,14 @@ kenyan_stock_analyzer/
 │   ├── market_context.py       # USD/KES rate + per-sector median valuation
 │   ├── scoring.py              # Transparent 0-100 factor score + per-stock alerts
 │   ├── history_tracker.py      # Appends a daily snapshot for later accuracy review
-│   ├── report_generator.py     # HTML/PDF reports, Excel export, charts, summary PDF
+│   ├── report_generator.py     # HTML/PDF reports, Excel export, the market pages, summary PDF
+│   ├── page_overview.py        # The 🏠 Overview page
+│   ├── page_portfolio.py       # The 💼 My Portfolio page (five tabs) + the net-worth arithmetic
+│   ├── page_stock.py           # Every stock's own page (NSE and international)
+│   ├── ui_theme.py             # The page shell shared by every page (+ ui_theme.css, ui_runtime.js)
+│   ├── ui_kit.py               # Small building blocks: headline figures, tabs, tables, ⓘ buttons…
+│   ├── svg_charts.py           # The interactive charts (inline SVG — no images)
+│   ├── glossary.py             # The plain-English explanation behind every ⓘ
 │   ├── sector_analysis.py      # Sector-level aggregation
 │   ├── portfolio.py            # Your NSE stock holdings: gain/loss, dividends, history (private)
 │   ├── international_portfolio.py  # Your US-listed holdings in USD, converted to KES (private)
@@ -441,9 +450,7 @@ kenyan_stock_analyzer/
 │   └── email_notifier.py       # Email report sending
 │
 ├── templates/
-│   ├── base.html               # Base HTML template with shared styles
-│   ├── stock_report.html       # Individual stock report template
-│   ├── international_stock_report.html  # Individual page for an international stock (any currency)
+│   ├── base.html               # Base template of the market summary (the PDF)
 │   └── market_summary.html     # Market summary template
 │
 ├── portfolio/                  # YOUR private holdings + watchlist (CSV/JSON, gitignored) + backups/ + the tracked example templates + guide
@@ -498,7 +505,6 @@ See [`requirements.txt`](requirements.txt) for the authoritative, version-pinned
 
 ```
 tvkit, yfinance, pandas, numpy, python-dotenv         # core data
-matplotlib, seaborn                                    # charts
 jinja2, weasyprint, openpyxl                            # HTML/PDF/Excel reports
 beautifulsoup4, requests, pdfplumber                    # scraping / PDF text
 pytesseract, pdf2image                                  # NSE PDF OCR fallback

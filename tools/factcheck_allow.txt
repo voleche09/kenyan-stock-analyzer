@@ -1,0 +1,72 @@
+# Reviewed, intended differences between the old pages and the redesign, so
+# tools/factcheck.py doesn't report them again. One rule per line:
+#     <category> <page-glob> <regex>
+# category: number | precision | sentence | cell | cell-moved | kpi | link | mark | page | *
+# Rules are patterns, never values — this file is public. A changed cell or
+# headline figure is matched as "OLD  ->  ['NEW', …]".
+
+# --- Every page -------------------------------------------------------------
+# A 0.00% day move is no longer coloured as a gain.
+cell * \| (today|change) \| \+0\.00% \[pos\]  ->  \['\+0\.00%'\]$
+
+# --- My Portfolio -----------------------------------------------------------
+# The "Jump to" bars became tabs; every old anchor (#stocks-holdings, …) still
+# exists on the page and opens its tab.
+link portfolio ^#(stocks|bonds|intl)-[a-z]+$
+sentence portfolio ^jump to:
+# Holdings without a report page used to link to "#"; now they aren't links.
+link portfolio ^#$
+
+# Fractional share counts are shown as they are (1.5) instead of rounded (2).
+cell portfolio \| qty \| \d+  ->  \['\d+\.\d+'\]$
+# The net-worth hero's heading is now the "Total net worth" figure and its note.
+sentence portfolio ^total net worth - stocks \+ bonds \+ international, today$
+# News: the "SYMBOL · source" header became a symbol pill plus a "source · date" line.
+sentence portfolio ^[a-z0-9.]{2,12} · [\w.\- ]+$
+# The command-line examples use a placeholder ticker now.
+sentence portfolio add_holding\.py
+# The terminal example for adding a bond shows the format only, instead of a
+# command naming a particular bond (its example amount and date went with it).
+sentence portfolio add_bond\.py issue face_value \[purchase_price_pct\] \[purchase_date\] \./venv/bin/python# add_bond\.py
+number portfolio ^ \+250000$
+number portfolio ^date 2022-\d\d-\d\d$
+# The bonds intro no longer says "above" — bonds have their own tab now.
+sentence portfolio fixed-income complement to your stock holdings above$
+# International: the KES amount moved from the label into the figure's note.
+sentence portfolio ^market value today \(kes #\)$
+# Chart image descriptions became chart titles.
+sentence portfolio ^(gain/loss by holding|bond allocation by face value|value sensitivity to market yield)$
+
+# --- Watchlist --------------------------------------------------------------
+# Chart image descriptions ("SYMBOL price chart") became chart titles.
+sentence watchlist price chart$
+
+# --- Overview ---------------------------------------------------------------
+# The 🟢 / 🔴 on the "Top Gainers / Top Losers" headings became line icons.
+mark index ^(green|red) ×1$
+
+# --- Per-stock pages --------------------------------------------------------
+# The header line ("Generated at … | Market Cap … | Price … | Daily Change …")
+# became the hero: price, today's change and market cap (each still checked
+# as a number); the generated time is in the top bar.
+sentence *_report ^generated at #
+# The "SYMBOL — Sector" / "SYMBOL — Company name" heading became the hero
+# (symbol, then the name and sector underneath).
+sentence *_report ^[a-z0-9.]{1,15} - [a-z][a-z&,.\- ]*$
+# Each indicator chart's "SYMBOL — ATR (Volatility)" heading became a small
+# chart title ("ATR — typical daily move").
+sentence *_report ^[a-z0-9.]{1,15} - (rsi|macd|volume|stochastic|atr \(volatility\))$
+# "black = no data" isn't true in dark mode: uncoloured values have no data.
+sentence *_report ^green = good · amber = average · red = weak/risky · black = no data$
+# A real zero (no debt, no dividend) reads 0.00 in every place instead of
+# N/A in one and 0.00 in another; a missing value is never coloured.
+kpi *_report ^(debt/equity|dividend yield) = N/A( \[pos\])?  ->  \['0\.00%?( \[(pos|warn)\])?'\]$
+kpi *_report = N/A \[(pos|neg)\]  ->  \['N/A'\]$
+
+# --- Market pages -----------------------------------------------------------
+# "black = no data" isn't true in dark mode: uncoloured values have no data.
+sentence fundamentals ^green = good , amber = average , red = weak/risky , black = no data$
+# The heatmap colours follow the theme now, so a bigger move is a stronger
+# colour (deeper in light mode), not always "brighter".
+sentence visuals \(brighter = bigger move\)$
+sentence visuals · brighter = bigger move · hover a tile for details$

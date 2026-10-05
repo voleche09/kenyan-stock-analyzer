@@ -329,6 +329,10 @@ def fetch_news(symbol, company_name=None, max_items_per_symbol=6, max_age_days=7
         if n['url'] not in seen:
             combined.append(n)
             seen.add(n['url'])
+    # Links come from third parties: only plain web links are kept (never
+    # javascript:, data: or relative URLs). Pages escape every field too.
+    combined = [n for n in combined
+                if str(n.get('url') or '').strip().lower().startswith(('http://', 'https://'))]
     return combined[: max_items_per_symbol * 2]
 
 

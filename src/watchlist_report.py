@@ -24,6 +24,9 @@ import os
 import re
 from html import escape
 
+from markupsafe import Markup
+
+import ui_kit as ui
 import watchlist as wl
 from logger import get_logger
 
@@ -308,99 +311,43 @@ def collect(config, entries, analysis_engine, report_gen, preloaded=None, period
 # ----------------------------------------------------------------------------
 # Chart — one compact 3-panel picture per stock
 # ----------------------------------------------------------------------------
-def make_chart(report_gen, data, view):
-    """Price + 20/50-day averages + normal range + YOUR buy/sell prices, with
-    volume and RSI underneath. Returns base64 PNG, or None if there's no data."""
-    try:
-        import matplotlib.pyplot as plt
-        import matplotlib.dates as mdates
-        import matplotlib.ticker as mticker
-        from matplotlib.lines import Line2D
-        from report_generator import COLORS
-    except Exception:
-        return None
+def make_charts(view, data):
+    """The card's charts as inline SVG: a 6-month sparkline for the compact
+    card, and — for the opened card — the price chart (20/50-day averages,
+    normal range, YOUR buy/sell prices and the 52-week high/low) with volume
+    and RSI underneath. Returns {"spark": Markup, "chart": Markup}; a far-away
+    target is listed under the chart instead of squashing the line."""
+    import svg_charts as sc
+    from markupsafe import Markup
     if data is None or getattr(data, "empty", True) or "close" not in data:
-        return None
+        return {"spark": sc.sparkline([], label=view["symbol"]),
+                "chart": Markup('<p class="wl-nodata">Not enough price history for a chart yet.</p>')}
     cur = view["facts"]["currency"]
-    money = lambda v: wl.fmt_money(v, cur)  # noqa: E731
-    try:
-        fig = plt.figure(figsize=(10, 5.8))
-        gs = fig.add_gridspec(3, 1, height_ratios=[3.3, 1, 1.1], hspace=0.07)
-        ax = fig.add_subplot(gs[0])
-        axv = fig.add_subplot(gs[1], sharex=ax)
-        axr = fig.add_subplot(gs[2], sharex=ax)
-        idx = data.index
-        close = data["close"]
+    money = sc.Fmt(_money_prefix(cur), 2, suffix=_money_suffix(cur))
+    refs = []
+    if view["buy_below"]:
+        refs.append((view["buy_below"], "buy", f"Your buy price {wl.fmt_money(view['buy_below'], cur)}"))
+    if view["sell_above"]:
+        refs.append((view["sell_above"], "sell", f"Your sell price {wl.fmt_money(view['sell_above'], cur)}"))
+    for value, label in ((view["facts"]["week52_high"], "52-week high"), (view["facts"]["week52_low"], "52-week low")):
+        if value:
+            refs.append((value, "level", f"{label} {wl.fmt_money(value, cur)}"))
+    cid = _anchor(view).replace(".", "-")
+    closes = list(data["close"])
+    spark = sc.sparkline(closes[-126:], label=f"{view['symbol']}, last 6 months", fmt=money,
+                         refs=[(view["buy_below"], "buy"), (view["sell_above"], "sell")])
+    price = sc.price_chart(f"c-{cid}", data, money=money, refs=refs, title=f"{view['symbol']} price", height=260)
+    small = sc.indicator_charts(f"c-{cid}", data, money=money, x_ref=f"c-{cid}")
+    chart = Markup(f'{price}<div class="grid-2 wl-small-charts">{small["volume"]}{small["rsi"]}</div>')
+    return {"spark": spark, "chart": chart}
 
-        if "bb_upper" in data and "bb_lower" in data:
-            ax.fill_between(idx, data["bb_lower"], data["bb_upper"], color=COLORS["bb"], alpha=0.08,
-                            label="Normal range (Bollinger)")
-        ax.plot(idx, close, color=COLORS["price"], linewidth=1.7, label="Price")
-        if "sma_20" in data:
-            ax.plot(idx, data["sma_20"], color=COLORS["sma20"], linestyle="--", linewidth=1.1, label="20-day average")
-        if "sma_50" in data:
-            ax.plot(idx, data["sma_50"], color=COLORS["sma50"], linestyle="--", linewidth=1.1, label="50-day average")
 
-        lo_p, hi_p = float(close.min()), float(close.max())
-        span = max(hi_p - lo_p, hi_p * 0.02)
-        lo_ok, hi_ok = lo_p - span * 0.6, hi_p + span * 0.6
-        extra = []
-        for value, colour, label in ((view["buy_below"], "#16a34a", "Your buy price"),
-                                     (view["sell_above"], "#dc2626", "Your sell price")):
-            if not value:
-                continue
-            if lo_ok <= value <= hi_ok:
-                ax.axhline(value, color=colour, linewidth=1.4, linestyle=(0, (6, 3)),
-                           label=f"{label} {money(value)}")
-            else:
-                where = "below" if value < lo_ok else "above"
-                extra.append(Line2D([], [], color=colour, linewidth=1.4, linestyle=(0, (6, 3)),
-                                    label=f"{label} {money(value)} ({where} this chart)"))
-        for value, label in ((view["facts"]["week52_high"], "52-week high"),
-                             (view["facts"]["week52_low"], "52-week low")):
-            if value and lo_ok <= value <= hi_ok:
-                ax.axhline(value, color="#64748b", linewidth=0.9, linestyle=":", label=f"{label} {money(value)}")
+def _money_prefix(cur):
+    return {"KES": "KES ", "USD": "$", "GBP": "£", "EUR": "€"}.get(cur, "")
 
-        handles, labels = ax.get_legend_handles_labels()
-        handles += extra
-        labels += [h.get_label() for h in extra]
-        ax.legend(handles, labels, loc="upper left", fontsize=7.5, ncol=2, frameon=True, framealpha=0.85)
-        ax.grid(True, alpha=0.3)
-        ax.set_ylabel(cur, fontsize=8)
-        ax.tick_params(labelbottom=False, labelsize=8)
 
-        if "volume" in data:
-            ups = close.diff().fillna(0) >= 0
-            axv.bar(idx, data["volume"], color=[COLORS["bullish"] if u else COLORS["sma50"] for u in ups],
-                    alpha=0.65, width=0.8)
-            axv.yaxis.set_major_formatter(mticker.FuncFormatter(
-                lambda x, _p: f"{x / 1e6:.1f}M" if x >= 1e6 else f"{x / 1e3:.0f}K" if x >= 1e3 else f"{x:.0f}"))
-        axv.set_ylabel("Volume", fontsize=8)
-        axv.grid(True, alpha=0.3)
-        axv.tick_params(labelbottom=False, labelsize=7)
-
-        if "rsi" in data:
-            axr.plot(idx, data["rsi"], color=COLORS["rsi"], linewidth=1.1)
-            axr.axhline(70, color=COLORS["sma50"], linestyle="--", linewidth=0.8, alpha=0.7)
-            axr.axhline(30, color=COLORS["bullish"], linestyle="--", linewidth=0.8, alpha=0.7)
-            axr.fill_between(idx, 70, 100, color=COLORS["sma50"], alpha=0.06)
-            axr.fill_between(idx, 0, 30, color=COLORS["bullish"], alpha=0.06)
-        axr.set_ylim(0, 100)
-        axr.set_yticks([30, 70])
-        axr.set_ylabel("RSI", fontsize=8)
-        axr.grid(True, alpha=0.3)
-        axr.tick_params(labelsize=8)
-        locator = mdates.AutoDateLocator()
-        axr.xaxis.set_major_locator(locator)
-        axr.xaxis.set_major_formatter(mdates.ConciseDateFormatter(locator))
-        return report_gen._fig_to_b64(dpi=100)
-    except Exception as e:
-        logger.warning(f"Watchlist chart failed for {view['symbol']}: {e}")
-        try:
-            plt.close("all")
-        except Exception:
-            pass
-        return None
+def _money_suffix(cur):
+    return "" if cur in ("KES", "USD", "GBP", "EUR") else f" {cur}"
 
 
 # ----------------------------------------------------------------------------
@@ -451,34 +398,36 @@ def _key_numbers(view, usd_kes):
     f, cur = view["facts"], view["facts"]["currency"]
     rows = []
     if f["price"] is not None and cur == "USD" and usd_kes and usd_kes.get("rate"):
-        rows.append(("In Kenya shillings", f"≈ KES {f['price'] * usd_kes['rate']:,.2f}"))
+        rows.append(("In Kenya shillings", f"≈ KES {f['price'] * usd_kes['rate']:,.2f}", None))
     if f["market_cap"]:
-        rows.append(("Company value (market cap)", wl.fmt_big(f["market_cap"], cur)))
+        rows.append(("Company value (market cap)", wl.fmt_big(f["market_cap"], cur), "market-cap"))
     if f["pe"] is not None:
-        rows.append(("P/E ratio", _fmt_ratio(f["pe"])))
+        rows.append(("P/E ratio", _fmt_ratio(f["pe"]), "pe"))
     if f["forward_pe"] is not None:
-        rows.append(("Forward P/E", _fmt_ratio(f["forward_pe"])))
+        rows.append(("Forward P/E", _fmt_ratio(f["forward_pe"]), None))
     if f["peg"] is not None:
-        rows.append(("PEG ratio", _fmt_ratio(f["peg"], d=2)))
+        rows.append(("PEG ratio", _fmt_ratio(f["peg"], d=2), "peg"))
     if f["price_to_book"] is not None:
-        rows.append(("Price / book", _fmt_ratio(f["price_to_book"], d=2)))
+        rows.append(("Price / book", _fmt_ratio(f["price_to_book"], d=2), None))
     if f["eps"] is not None:
-        rows.append(("Earnings per share", wl.fmt_money(f["eps"], cur)))
+        rows.append(("Earnings per share", wl.fmt_money(f["eps"], cur), "eps"))
     if f["dividend_yield"]:
-        rows.append(("Dividend yield", _fmt_ratio(f["dividend_yield"], "%")))
+        rows.append(("Dividend yield", _fmt_ratio(f["dividend_yield"], "%"), "dividend-yield"))
     if f["roe"] is not None:
-        rows.append(("Return on equity", _fmt_ratio(f["roe"], "%")))
+        rows.append(("Return on equity", _fmt_ratio(f["roe"], "%"), "roe"))
     if f["debt_to_equity"] is not None:
-        rows.append(("Debt / equity", _fmt_ratio(f["debt_to_equity"], d=2)))
+        rows.append(("Debt / equity", _fmt_ratio(f["debt_to_equity"], d=2), "debt-to-equity"))
     if f["beta"] is not None:
-        rows.append(("Beta (swings vs market)", _fmt_ratio(f["beta"], d=2)))
+        rows.append(("Beta (swings vs market)", _fmt_ratio(f["beta"], d=2), None))
     if f["volume"] and f["avg_volume"]:
-        rows.append(("Today's volume vs usual", f"{f['volume'] / f['avg_volume']:.1f}× average"))
+        rows.append(("Today's volume vs usual", f"{f['volume'] / f['avg_volume']:.1f}× average", "volume"))
     if f["week52_low"] and f["week52_high"]:
-        rows.append(("52-week range", f"{wl.fmt_money(f['week52_low'], cur)} – {wl.fmt_money(f['week52_high'], cur)}"))
+        rows.append(("52-week range", f"{wl.fmt_money(f['week52_low'], cur)} – {wl.fmt_money(f['week52_high'], cur)}",
+                     "range-52w"))
     if not rows:
         return '<p class="wl-nodata">No company numbers available.</p>'
-    return "".join(f'<div class="wl-kv"><span>{_e(k)}</span><span>{_e(v)}</span></div>' for k, v in rows)
+    return "".join(f'<div class="wl-kv"><span>{_e(k)}{ui.info(term) if term else ""}</span><span>{_e(v)}</span></div>'
+                   for k, v, term in rows)
 
 
 def _events(view, today):
@@ -538,18 +487,90 @@ def _logo(report_gen, view):
                                         international=view["market"] == wl.MARKET_INTL)
 
 
-def render_card(report_gen, view, chart_b64, usd_kes, today):
+def _attention_priority(icon, view):
+    """0 = your own targets, 1 = everything else, 2 = missing data (same as the list)."""
+    return 0 if icon in ("🎯", "💰") else 2 if (icon == "⚠️" and not view["has_data"]) else 1
+
+
+def _target_bar(view):
+    """Where the price sits between YOUR buy and sell prices, or — without
+    both targets — within the 52-week range, with any target marked."""
     f, cur = view["facts"], view["facts"]["currency"]
+    price = f["price"]
+    fmt = lambda v: wl.fmt_money(v, cur)  # noqa: E731
+    if price is None:
+        return ""
+    if view["buy_below"] and view["sell_above"] and view["sell_above"] > view["buy_below"]:
+        return ui.range_bar(view["buy_below"], view["sell_above"], price, fmt=fmt, label="Between your buy and sell prices")
+    if f["week52_low"] and f["week52_high"]:
+        marks = [(v, lab, c) for v, lab, c in ((view["buy_below"], "Your buy price", "buy"),
+                                                (view["sell_above"], "Your sell price", "sell"))
+                 if v and f["week52_low"] <= v <= f["week52_high"]]
+        return ui.range_bar(f["week52_low"], f["week52_high"], price, marks=marks, fmt=fmt, label="52-week range")
+    return ""
+
+
+def _signal_meter(view):
+    t = view["tally"]
+    total = t["buy"] + t["sell"] + t["neutral"]
+    if not total:
+        return '<span class="chip chip-none">no signals</span>'
+    up, down = t["buy"] / total * 100, t["sell"] / total * 100
+    return (f'<span class="meter" role="img" aria-label="{t["buy"]} signals lean positive, {t["sell"]} negative, '
+            f'{t["neutral"]} neutral"><i class="m-up" style="width:{up:.0f}%"></i>'
+            f'<i class="m-down" style="width:{down:.0f}%"></i></span>'
+            f'<span class="meter-text"><b class="positive">▲{t["buy"]}</b> <b class="negative">▼{t["sell"]}</b> '
+            f'<span class="chip {_SUMMARY_CHIP[view["summary_token"]]}">{_e(view["summary"])}</span></span>')
+
+
+def render_card(report_gen, view, charts, usd_kes, today, order=0):
+    """One watchlist stock: a compact card that opens in place, full width,
+    showing everything — the chart, the checklist, key numbers, performance,
+    key dates, news, your note, links and the edit / remove buttons. The
+    whole card is one .wl-card (the dashboard app finds its buttons and
+    adds the edit form inside it)."""
+    f, cur = view["facts"], view["facts"]["currency"]
+    anchor = _anchor(view)
     logo = _logo(report_gen, view)
-    head = (f'<div class="wl-head"><div class="wl-title">{logo}<span>{_e(view["symbol"])}</span>'
-            f'<span class="wl-fullname">{_e(view["name"] if view["name"] != view["symbol"] else "")}</span>'
-            f'{_market_badge(view)}</div>')
+    charts = charts or {}
+    name = view["name"] if view["name"] != view["symbol"] else ""
+    alerts = view["attention"]
+    prio = min((_attention_priority(i, view) for i, _t in alerts), default=9)
+    gap = None
+    if view["buy_below"] and f["price"]:
+        gap = (f["price"] - view["buy_below"]) / view["buy_below"] * 100
+    tags = ["nse" if view["market"] == wl.MARKET_NSE else "intl"]
+    if view["target"]["status"] == "buy_zone":
+        tags.append("buyzone")
+    # Sort keys for the page's Sort menu (ui_runtime.js reads data-k-*).
+    sort_attrs = (f'data-tags="{" ".join(tags)}" data-k-attention="{prio}" data-k-order="{order}" '
+                  f'data-k-move="{abs(f["change_pct"] or 0):.2f}" '
+                  f'data-k-buy="{abs(gap) if gap is not None else 1e9:.2f}" '
+                  f'data-k-score="{view["score"] if view["score"] is not None else -1}" '
+                  f'data-k-name="{_e(view["symbol"])}"')
+
+    # ---- the compact card
     if view["has_data"]:
         chg = f["change_pct"]
-        head += (f'<div class="wl-price"><div class="wl-p">{_e(wl.fmt_money(f["price"], cur))}</div>'
-                 f'<div class="{_pct_class(chg)}">{_e(wl.fmt_pct(chg, decimals=2))} today</div></div>')
-    head += "</div>"
+        price = (f'<div class="wl-price"><b class="num">{_e(wl.fmt_money(f["price"], cur))}</b>'
+                 f'<span class="{_pct_class(chg)} num">{_e(wl.fmt_pct(chg, decimals=2))} today</span></div>')
+    else:
+        price = '<div class="wl-price"><span class="chip chip-none">no data today</span></div>'
+    icons = "".join(f'<span class="wl-alert" title="{_e(text)}">{_e(icon)}</span>' for icon, text in alerts)
+    score = view["score"]
+    score_html = (f'<span class="score {"score-high" if score >= 70 else "score-mid" if score >= 45 else "score-low"}" '
+                  f'title="Factor score 0–100">{score}</span>' if score is not None else "")
+    face = (f'<button type="button" class="wl-face" data-expand="{anchor}" aria-expanded="false" '
+            f'aria-controls="{anchor}-detail">'
+            f'<span class="wl-top"><span class="sym">{logo}<span>{_e(view["symbol"])}<small>{_e(name)}</small>'
+            f'{_market_badge(view)}</span></span>{price}</span>'
+            f'<span class="wl-spark">{charts.get("spark", "")}</span>'
+            f'<span class="wl-target">{_target_bar(view)}</span>'
+            f'<span class="wl-meta">{_signal_meter(view) if view["has_data"] else ""}'
+            f'<span class="wl-icons">{icons}{score_html}</span></span>'
+            f'<span class="wl-open" aria-hidden="true">Details ›</span></button>')
 
+    # ---- the opened card
     sub = []
     if f.get("sector"):
         sub.append(_e(f["sector"] + (f" · {f['industry']}" if f.get("industry") else "")))
@@ -563,50 +584,44 @@ def render_card(report_gen, view, chart_b64, usd_kes, today):
         sub.append(f"Watching since {_e(view['added'])}")
     if view["holding"]:
         sub.append("💼 " + _e(view["holding"]["text"]))
-
-    if not view["has_data"]:
-        return (f'<div class="section wl-card" id="{_anchor(view)}">{head}'
-                f'<div class="wl-sub">{" · ".join(sub)}</div>'
-                f'<p class="wl-nodata">⚠️ No price data for <b>{_e(view["symbol"])}</b> today. If this is a new '
-                f'stock, check the ticker is right (on the {"NSE" if view["market"] == wl.MARKET_NSE else "exchange you meant"}) '
-                f'— or the data source may just be down; it will be tried again on the next update.</p>'
-                f'<div class="wl-links"><a href="{_e(view["external_url"])}" target="_blank" rel="noopener noreferrer">'
-                f'Look it up on {_e(view["external_label"])} ↗</a>{_actions_html(view)}</div></div>')
-
-    tchip_cls, tchip_txt = _target_chip(view)
-    t = view["tally"]
-    chips = (f'<span class="chip {_SUMMARY_CHIP[view["summary_token"]]}">{_e(view["summary"])}</span>'
-             f'<span class="chip {tchip_cls}">{_e(tchip_txt)}</span>')
-    if view["score"] is not None:
-        sc = view["score"]
-        cls = "score-high" if sc >= 70 else "score-mid" if sc >= 45 else "score-low"
-        chips += f'<span class="score {cls}" title="Factor score 0–100">Score {sc}</span>'
-
-    checklist = "".join(
-        f'<li class="{"na" if it["lean"] == "na" else ""}"><span>{_LEAN_ICON[it["lean"]]}</span>'
-        f'<span><b>{_e(it["label"])}:</b> {_e(it["text"])}</span></li>' for it in view["checklist"])
-    tally_txt = (f'Tally: <b>{t["buy"]}</b> lean positive · <b>{t["sell"]}</b> lean negative · '
-                 f'<b>{t["neutral"]}</b> neutral (52-week position and your own targets are shown but not counted).')
-    chart = (f'<img class="chart-img" src="data:image/png;base64,{chart_b64}" alt="{_e(view["symbol"])} price chart" loading="lazy">'
-             if chart_b64 else '<p class="wl-nodata">Not enough price history for a chart yet.</p>')
-
-    boxes = (f'<div class="wl-box"><h4>Key numbers</h4>{_key_numbers(view, usd_kes)}</div>'
-             f'<div class="wl-box"><h4>Performance</h4>{_perf_html(view)}'
-             f'<h4 style="margin-top:12px;">Key dates</h4>{_events(view, today)}</div>'
-             f'<div class="wl-box wl-news"><h4>Latest news</h4>{_news_html(view)}</div>')
-    note = f'<div class="wl-note">📝 {_e(view["note"])}</div>' if view["note"] else ""
     links = ""
     if view["detail_file"]:
         links += f'<a href="{_e(view["detail_file"])}">📄 Full analysis →</a>'
-    links += (f'<a href="{_e(view["external_url"])}" target="_blank" rel="noopener noreferrer">'
-              f'{_e(view["external_label"])} ↗</a>')
-    return (f'<div class="section wl-card" id="{_anchor(view)}">{head}'
-            f'<div class="wl-sub">{" · ".join(sub)}</div>'
-            f'<div class="wl-chips">{chips}</div>'
-            f'<div class="wl-body"><div>{chart}</div><div><ul class="wl-check">{checklist}</ul>'
-            f'<div class="wl-tally">{tally_txt}</div></div></div>'
-            f'<div class="wl-grid">{boxes}</div>{note}'
-            f'<div class="wl-links">{links}{_actions_html(view)}</div></div>')
+    if not view["has_data"]:
+        detail = (f'<div class="wl-sub">{" · ".join(sub)}</div>'
+                  f'<p class="wl-nodata">⚠️ No price data for <b>{_e(view["symbol"])}</b> today. If this is a new '
+                  f'stock, check the ticker is right (on the {"NSE" if view["market"] == wl.MARKET_NSE else "exchange you meant"}) '
+                  f'— or the data source may just be down; it will be tried again on the next update.</p>'
+                  f'<div class="wl-links"><a href="{_e(view["external_url"])}" target="_blank" rel="noopener noreferrer">'
+                  f'Look it up on {_e(view["external_label"])} ↗</a>{_actions_html(view)}</div>')
+    else:
+        tchip_cls, tchip_txt = _target_chip(view)
+        t = view["tally"]
+        chips = (f'<span class="chip {_SUMMARY_CHIP[view["summary_token"]]}">{_e(view["summary"])}</span>'
+                 f'<span class="chip {tchip_cls}">{_e(tchip_txt)}</span>')
+        if score is not None:
+            cls = "score-high" if score >= 70 else "score-mid" if score >= 45 else "score-low"
+            chips += f'<span class="score {cls}" title="Factor score 0–100">Score {score}</span>'
+        checklist = "".join(
+            f'<li class="{"na" if it["lean"] == "na" else ""}"><span>{_LEAN_ICON[it["lean"]]}</span>'
+            f'<span><b>{_e(it["label"])}:</b> {_e(it["text"])}</span></li>' for it in view["checklist"])
+        tally_txt = (f'Tally: <b>{t["buy"]}</b> lean positive · <b>{t["sell"]}</b> lean negative · '
+                     f'<b>{t["neutral"]}</b> neutral (52-week position and your own targets are shown but not counted).')
+        note = f'<div class="wl-note">📝 {_e(view["note"])}</div>' if view["note"] else ""
+        links += (f'<a href="{_e(view["external_url"])}" target="_blank" rel="noopener noreferrer">'
+                  f'{_e(view["external_label"])} ↗</a>')
+        detail = (f'<div class="wl-sub">{" · ".join(sub)}</div>'
+                  f'<div class="wl-chips">{chips}</div>'
+                  f'<div class="wl-chart">{charts.get("chart", "")}</div>'
+                  f'<div class="wl-columns"><div><h4>The checklist{ui.info("signal")}</h4>'
+                  f'<ul class="wl-check">{checklist}</ul><div class="wl-tally">{tally_txt}</div></div>'
+                  f'<div class="wl-boxes"><div class="wl-box"><h4>Key numbers</h4>{_key_numbers(view, usd_kes)}</div>'
+                  f'<div class="wl-box"><h4>Performance</h4>{_perf_html(view)}'
+                  f'<h4 style="margin-top:12px;">Key dates</h4>{_events(view, today)}</div>'
+                  f'<div class="wl-box wl-news"><h4>Latest news</h4>{_news_html(view)}</div></div></div>'
+                  f'{note}<div class="wl-links">{links}{_actions_html(view)}</div>')
+    return (f'<article class="wl-card" id="{anchor}" {sort_attrs}>{face}'
+            f'<div class="wl-detail" id="{anchor}-detail">{detail}</div></article>')
 
 
 def _table(report_gen, views):
@@ -616,52 +631,49 @@ def _table(report_gen, views):
         logo = _logo(report_gen, v)
         name = v["name"] if v["name"] != v["symbol"] else ""
         sa = (v["since_added"] or {}).get("pct")
-        sa_html = (_e(wl.fmt_pct(sa)) if sa is not None
+        sa_html = (wl.fmt_pct(sa) if sa is not None
                    else "new" if v.get("added") == _dt_today().isoformat() else "—")
         pos = v["range_pos"]
-        rng = (f'<span style="display:none">{pos:.0f}</span><span class="range-bar" '
-               f'title="{_e(wl.fmt_money(f["week52_low"], cur))} – {_e(wl.fmt_money(f["week52_high"], cur))} '
-               f'(52 weeks)"><i style="left:{pos:.0f}%"></i></span>') if pos is not None else "—"
+        rng = ui.range_bar(f["week52_low"], f["week52_high"], f["price"],
+                           fmt=lambda x: wl.fmt_money(x, cur), label="52-week range") if pos is not None else "—"
         tchip_cls, tchip_txt = _target_chip(v)
         t = v["tally"]
         if v["has_data"]:
-            sig = (f'<span class="chip {_SUMMARY_CHIP[v["summary_token"]]}" title="{_e(v["summary"])}">'
-                   f'▲{t["buy"]} ▼{t["sell"]}</span>')
+            sig = Markup(f'<span class="chip {_SUMMARY_CHIP[v["summary_token"]]}" title="{_e(v["summary"])}">'
+                         f'▲{t["buy"]} ▼{t["sell"]}</span>')
         else:
-            sig = '<span class="chip chip-none">no data</span>'
-        sc = v["score"]
-        sc_html = (f'<span class="score {"score-high" if sc >= 70 else "score-mid" if sc >= 45 else "score-low"}">{sc}</span>'
-                   if sc is not None else "—")
-        rows.append(
-            f'<tr><td><a href="#{_anchor(v)}" class="stock-link">{logo}<strong>{_e(v["symbol"])}</strong></a>'
-            f'<span class="wl-name-sm">{_e(name)}</span></td>'
-            f'<td>{_market_badge(v)}</td>'
-            f'<td>{_e(wl.fmt_money(f["price"], cur))}</td>'
-            f'<td class="{_pct_class(f["change_pct"])}">{_e(wl.fmt_pct(f["change_pct"], decimals=2))}</td>'
-            f'<td class="{_pct_class(sa)}">{sa_html}</td>'
-            f'<td>{rng}</td>'
-            f'<td><span class="chip {tchip_cls}">{_e(tchip_txt)}</span></td>'
-            f'<td>{sig}</td><td>{sc_html}</td></tr>')
-    return ('<div class="table-wrap"><table id="mainTable" class="wl-table"><thead><tr>'
-            '<th class="sortable" data-sort-type="text" onclick="sortTable(this)">Stock</th>'
-            '<th class="sortable" data-sort-type="text" onclick="sortTable(this)">Market</th>'
-            '<th class="sortable" data-sort-type="number" onclick="sortTable(this)">Price</th>'
-            '<th class="sortable" data-sort-type="number" onclick="sortTable(this)">Today</th>'
-            '<th class="sortable" data-sort-type="number" onclick="sortTable(this)" '
-            'title="Change since the day you added it to the watchlist">Since added</th>'
-            '<th class="sortable" data-sort-type="number" onclick="sortTable(this)" '
-            'title="Where today\'s price sits between its 52-week low (left) and high (right)">52-week range</th>'
-            '<th>Your targets</th>'
-            '<th title="How many signals lean positive (▲) vs negative (▼) — see each card">Signals</th>'
-            '<th class="sortable" data-sort-type="number" onclick="sortTable(this)">Score</th>'
-            f'</tr></thead><tbody>{"".join(rows)}</tbody></table></div>')
+            sig = Markup('<span class="chip chip-none">no data</span>')
+        sc_ = v["score"]
+        sc_html = (Markup(f'<span class="score {"score-high" if sc_ >= 70 else "score-mid" if sc_ >= 45 else "score-low"}">'
+                          f'{sc_}</span>') if sc_ is not None else "—")
+        rows.append([
+            ui.cell(Markup(f'<a href="#{_anchor(v)}" class="stock-link sym">{logo}<span>{_e(v["symbol"])}'
+                           f'<small>{_e(name)}</small></span></a>'), sort=v["symbol"]),
+            ui.cell(Markup(_market_badge(v)), sort=v["market"]),
+            ui.cell(wl.fmt_money(f["price"], cur), sort=f["price"]),
+            ui.cell(wl.fmt_pct(f["change_pct"], decimals=2), sort=f["change_pct"], cls=_pct_class(f["change_pct"])),
+            ui.cell(sa_html, sort=sa, cls=_pct_class(sa)),
+            ui.cell(rng, sort=round(pos, 1) if pos is not None else None),
+            ui.cell(Markup(f'<span class="chip {tchip_cls}">{_e(tchip_txt)}</span>')),
+            ui.cell(sig, sort=t["buy"] - t["sell"] if v["has_data"] else None),
+            ui.cell(sc_html, sort=sc_),
+        ])
+    cols = [ui.Col("Stock", sort="text"), ui.Col("Market", sort="text"), ui.Col("Price", sort="number"),
+            ui.Col("Today", sort="number"),
+            ui.Col("Since added", sort="number", title="Change since the day you added it to the watchlist"),
+            ui.Col("52-week range", sort="number", term="range-52w",
+                   title="Where today's price sits between its 52-week low (left) and high (right)"),
+            ui.Col("Your targets", sort=None),
+            ui.Col("Signals", sort="number", title="How many signals lean positive (▲) vs negative (▼) — see each card"),
+            ui.Col("Score", sort="number", term="factor-score")]
+    return ui.table(cols, rows, table_id="mainTable", cls="wl-table")
 
 
 _NO_APP_HELP = (
-    '<div class="banner banner-info no-app-only"><b>➕ Want to add or remove stocks with a click?</b> '
+    '<div class="banner no-app-only" data-tone="info" role="note"><b>➕ Want to add or remove stocks with a click?</b> '
     'Open the dashboard through the app: double-click <b>Open Dashboard.command</b> in the project folder '
     '(or run <code>./venv/bin/python3 app.py</code>). This page then gets a search box and Add / Edit / '
-    'Remove buttons.<br><span style="font-size:0.85rem;">Prefer a spreadsheet? Add a row to '
+    'Remove buttons.<br><span class="small">Prefer a spreadsheet? Add a row to '
     '<code>portfolio/watchlist.csv</code> — columns <code>symbol, market</code> (NSE or INTL), '
     '<code>buy_below, sell_above, note</code> — then run <code>./run.sh</code>. On the Docker home-server '
     'install, edit that file on the server; it shows up after the next scheduled update.</span></div>')
@@ -694,14 +706,12 @@ def _explainer():
          "written down, so emotions don't make the decision."),
     ]
     body = "".join(f'<div class="explain-card"><h4>{_e(t)}</h4><p>{_e(p)}</p></div>' for t, p in cards)
-    return ('<details class="section-details"><summary><h2>📖 How to read this page</h2>'
-            '<span class="toggle-hint"></span></summary><div class="details-body">'
-            f'<div class="explain-grid">{body}</div>'
-            '<div class="banner banner-warn" style="margin-top:16px;">⚠️ This page is information, not financial '
-            'advice. Signals describe what prices and company figures have done — they can be wrong, and nobody can '
-            'predict the market. Think about your goals, how long you can stay invested, spreading your money '
-            'across different investments, and trading fees before you buy or sell.</div>'
-            '</div></details>')
+    return str(ui.details("📖 How to read this page", Markup(
+        f'<div class="explain-grid">{body}</div>'
+        '<div class="banner" data-tone="warn" role="note">⚠️ This page is information, not financial advice. Signals '
+        'describe what prices and company figures have done — they can be wrong, and nobody can predict the market. '
+        'Think about your goals, how long you can stay invested, spreading your money across different investments, '
+        'and trading fees before you buy or sell.</div>'), det_id="wl-howto"))
 
 
 def render_body(report_gen, views, charts, ctx, load_error=None, today=None):
@@ -711,13 +721,13 @@ def render_body(report_gen, views, charts, ctx, load_error=None, today=None):
            'brings together the price chart, trend, momentum, valuation, what analysts say and the latest news, '
            'so you can decide whether it\'s time to buy, wait or sell. This is information, not financial '
            'advice.</p>', _NO_APP_HELP,
-           '<div id="wl-add-panel" class="section app-only"></div>']
+           '<div id="wl-add-panel" class="section app-only card card-pad"></div>']
     if load_error:
-        out.append(f'<div class="banner banner-danger"><b>Your watchlist file couldn\'t be read:</b> '
+        out.append(f'<div class="banner" data-tone="danger" role="note"><b>Your watchlist file couldn\'t be read:</b> '
                    f'{_e(load_error)}<br>Fix <code>portfolio/watchlist.csv</code> (or delete it to start '
                    f'again) — see <code>portfolio/README.md</code>.</div>')
     if not views:
-        out.append('<div class="section wl-empty"><div class="big">⭐</div><h2>Your watchlist is empty</h2>'
+        out.append('<div class="section wl-empty card card-pad"><div class="big">⭐</div><h2>Your watchlist is empty</h2>'
                    '<p class="app-only">Use the search box above: type a company name or ticker — '
                    '<i>Equity</i>, <i>EABL</i>, <i>Apple</i>, <i>AAPL</i> — pick it from the list and click '
                    '<b>Add</b>. Or tap the ☆ next to any stock on the Overview page.</p>'
@@ -726,30 +736,60 @@ def render_body(report_gen, views, charts, ctx, load_error=None, today=None):
         out.append(_explainer())
         return "".join(out)
 
-    # 🔔 Attention list — your own targets first, then everything else, missing data last
+    # ---- headline figures
     attn = []
     for i, v in enumerate(views):
         for icon, text in v["attention"]:
-            prio = 0 if icon in ("🎯", "💰") else 2 if (icon == "⚠️" and not v["has_data"]) else 1
-            attn.append((prio, i, icon, text, _anchor(v)))
+            attn.append((_attention_priority(icon, v), i, icon, text, _anchor(v)))
     attn.sort(key=lambda a: (a[0], a[1]))
+    in_buy = sum(1 for v in views if v["target"]["status"] == "buy_zone")
+    at_sell = sum(1 for v in views if v["target"]["status"] == "sell_zone")
+    positive = sum(1 for v in views if v["summary_token"] == "positive")
+    out.append(str(ui.kpi_row([
+        ui.kpi("Watching", str(len(views)), sub="stocks on your list"),
+        ui.kpi("In your buy zone", str(in_buy), tone="up" if in_buy else None, sub="at or under your buy price"),
+        ui.kpi("At your sell price", str(at_sell), tone="accent" if at_sell else None, sub="at or over your sell price"),
+        ui.kpi("Mostly positive signals", str(positive), sub="more signals lean positive than negative", term="signal"),
+        ui.kpi("Needs your attention", str(len(attn)), tone="warn" if attn else None, sub="items today, below"),
+    ], cls="kpis-5")))
+
+    # ---- needs attention (chips that open the stock)
     if attn:
-        items = "".join(f'<li>{icon} <a href="#{anchor}">{_e(text)}</a></li>' for _p, _i, icon, text, anchor in attn)
+        items = "".join(f'<li><a href="#{anchor}" class="attn-chip" data-prio="{p}">{icon} {_e(text)}</a></li>'
+                        for p, _i, icon, text, anchor in attn)
         out.append(f'<div class="section"><h2>🔔 Needs your attention today</h2><ul class="wl-attn">{items}</ul></div>')
     else:
         out.append('<div class="section"><h2>🔔 Needs your attention today</h2>'
                    '<p class="wl-nodata">Nothing unusual today — no targets reached, no big moves, no '
                    'earnings or dividend dates this week.</p></div>')
 
-    in_buy = sum(1 for v in views if v["target"]["status"] == "buy_zone")
-    positive = sum(1 for v in views if v["summary_token"] == "positive")
+    # ---- the list: cards (default) or the table
     stats = (f'{len(views)} stock{"s" if len(views) != 1 else ""} · {positive} with mostly positive signals'
              + (f" · {in_buy} in your buy zone" if in_buy else ""))
-    out.append(f'<div class="section"><h2>⭐ Your watchlist</h2><p class="dq-note" style="margin:-6px 0 12px;">'
-               f'{_e(stats)}. Click a stock to jump to its card; click a column header to sort.</p>'
-               f'{_table(report_gen, views)}</div>')
-    for v in views:
-        out.append(render_card(report_gen, v, charts.get(_anchor(v)), usd_kes, today))
+    controls = (
+        '<div class="wl-controls" role="group" aria-label="Arrange your watchlist">'
+        '<label class="ctl">Sort <select data-sort-cards="wl-grid" aria-label="Sort the cards">'
+        '<option value="attention">Needs attention</option><option value="move">Biggest move today</option>'
+        '<option value="buy">Closest to your buy price</option><option value="score">Score</option>'
+        '<option value="name">Name</option></select></label>'
+        '<div class="seg" role="group" aria-label="Show">'
+        '<button type="button" data-filter-cards="wl-grid" data-filter="all" aria-pressed="true">All</button>'
+        '<button type="button" data-filter-cards="wl-grid" data-filter="nse" aria-pressed="false">NSE</button>'
+        '<button type="button" data-filter-cards="wl-grid" data-filter="intl" aria-pressed="false">International</button>'
+        '<button type="button" data-filter-cards="wl-grid" data-filter="buyzone" aria-pressed="false">In buy zone</button></div>'
+        '<div class="seg" role="group" aria-label="View">'
+        '<button type="button" data-view-switch="wl" data-view="cards" aria-pressed="true">Cards</button>'
+        '<button type="button" data-view-switch="wl" data-view="table" aria-pressed="false">Table</button></div>'
+        '</div>')
+    order = sorted(range(len(views)), key=lambda i: (min((_attention_priority(ic, views[i]) for ic, _t in views[i]["attention"]),
+                                                         default=9), i))
+    cards = "".join(render_card(report_gen, views[i], charts.get(_anchor(views[i])), usd_kes, today, order=n)
+                    for n, i in enumerate(order))
+    out.append(f'<div class="section" id="wl-list"><h2>⭐ Your watchlist</h2><p class="dq-note">{_e(stats)}. Click a '
+               f'stock to jump to its card; click a column header to sort.</p>{controls}'
+               f'<div class="wl-grid" id="wl-grid" data-view-of="wl" data-view-name="cards">{cards}</div>'
+               f'<div class="wl-table-view" data-view-of="wl" data-view-name="table">{_table(report_gen, views)}</div>'
+               '</div>')
     out.append(_explainer())
     return "".join(out)
 
@@ -764,10 +804,10 @@ def _subtitle(report_gen, ctx):
 
 def write_error_page(report_gen, message):
     """Last resort so the ⭐ Watchlist link never leads nowhere."""
-    body = (f'<div class="banner banner-danger"><b>The watchlist page couldn\'t be built this time.</b> '
-            f'{_e(message)}<br>Your watchlist file is untouched. Try updating again; if it keeps happening, '
+    body = (f'<div class="banner" data-tone="danger" role="note"><b>The watchlist page couldn\'t be built this '
+            f'time.</b> {_e(message)}<br>Your watchlist file is untouched. Try updating again; if it keeps happening, '
             f'the details are in logs/analyzer.log.</div>' + _NO_APP_HELP +
-            '<div id="wl-add-panel" class="section app-only"></div>')
+            '<div id="wl-add-panel" class="section app-only card card-pad"></div>')
     html = report_gen._page_shell("NSE — Watchlist", PAGE_FILE, report_gen.page_subtitle(), body)
     return report_gen.write_page(PAGE_FILE, html)
 
@@ -802,7 +842,7 @@ def generate_watchlist_page(config, report_gen, analysis_engine, preloaded=None,
                                    news=row["news"], detail_file=row["detail_file"], today=today)
         views.append(view)
         if view["has_data"] and row["result"]:
-            charts[_anchor(view)] = make_chart(report_gen, row["result"].get("data"), view)
+            charts[_anchor(view)] = make_charts(view, row["result"].get("data"))
 
     body = render_body(report_gen, views, charts, ctx, load_error=load_error, today=today)
     html = report_gen._page_shell("NSE — Watchlist", PAGE_FILE, _subtitle(report_gen, ctx), body)

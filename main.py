@@ -49,6 +49,15 @@ setup_logging(config)
 logger = get_logger(__name__)
 
 
+def watchlist_count(portfolio_dir):
+    """How many stocks are on the watchlist (for the Overview), or None."""
+    try:
+        import watchlist as watchlist_mod
+        return len(watchlist_mod.load_watchlist(portfolio_dir)) or None
+    except Exception:
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Kenyan Stock Analyzer — NSE Daily Dashboard'
@@ -357,6 +366,10 @@ def main():
             logger.warning(f"International portfolio tracking skipped: {e}")
 
         # ---- Individual reports (only if --detailed) ----
+        # Your own holdings (private) add a "Your position" strip to their
+        # stock's page and mark your average cost on its charts.
+        held_nse = {h['symbol']: h for h in (portfolio_summary or {}).get('holdings', [])}
+        held_intl = {h['symbol']: h for h in (intl_portfolio_summary or {}).get('holdings', [])}
         report_files = {}
         if args.detailed:
             logger.info("Generating individual stock reports...")
@@ -383,6 +396,7 @@ def main():
                         alerts=alerts.get(symbol),
                         sector_medians=sector_medians,
                         usd_kes=usd_kes,
+                        holding=held_nse.get(symbol),
                     )
                     if path:
                         fname = os.path.basename(path) if isinstance(path, str) else os.path.basename(path[0])
@@ -408,6 +422,7 @@ def main():
                         earnings_calendar=intl_data.fetch_earnings_calendar(sym),
                         news=[n for n in intl_portfolio_news if n['symbol'] == sym],
                         usd_kes=usd_kes,
+                        holding=held_intl.get(sym),
                     )
                     if path:
                         fname = os.path.basename(path) if isinstance(path, str) else os.path.basename(path[0])
@@ -447,6 +462,9 @@ def main():
             intl_portfolio_news=intl_portfolio_news,
             intl_portfolio_history_tracker=intl_portfolio_history_tracker,
             intl_report_files=intl_report_files,
+            intl_analysis_results=intl_analysis_results,
+            intl_fundamentals_data=intl_fundamentals_data,
+            watchlist_count=watchlist_count(config.portfolio_dir),
         )
 
         # ---- ⭐ Watchlist page (private — portfolio/watchlist.csv, gitignored) ----

@@ -460,7 +460,10 @@
       sessionStorage.removeItem('ma-scroll');
       var target = document.getElementById(want);
       if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // reveal() opens the card (or tab / section) first, so a card that's
+        // filtered out or in the table view still comes into view.
+        if (window.NSE && window.NSE.reveal) window.NSE.reveal(want, { smooth: true });
+        else target.scrollIntoView({ behavior: 'smooth', block: 'start' });
         target.classList.add('ma-flash');
       }
     }

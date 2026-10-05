@@ -185,6 +185,26 @@ def _canonical_issue(issue):
     return issue
 
 
+def load_extra_reference(path):
+    """Add the reference terms in a JSON file (same shape as BOND_REFERENCE)
+    — how the sandbox uses made-up bonds (tools/fake_bonds.py). Normal runs
+    don't: it happens only when BOND_REFERENCE_EXTRA names such a file.
+    Returns how many bonds were added."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            extra = json.load(f)
+    except (OSError, ValueError) as e:
+        logger.warning(f"BOND_REFERENCE_EXTRA: couldn't read {path}: {e}")
+        return 0
+    added = {_canonical_issue(k): v for k, v in extra.items() if isinstance(v, dict)}
+    BOND_REFERENCE.update(added)
+    return len(added)
+
+
+if os.environ.get("BOND_REFERENCE_EXTRA"):
+    load_extra_reference(os.environ["BOND_REFERENCE_EXTRA"])
+
+
 # ----------------------------------------------------------------------------
 # Loading + saving (the private lots file — same pattern as portfolio.py)
 # ----------------------------------------------------------------------------
