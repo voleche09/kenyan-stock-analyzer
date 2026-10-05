@@ -57,6 +57,7 @@ import portfolio_csv
 import symbol_lookup
 import watchlist as wl
 from logger import get_logger
+from ui_theme import NAV_FILES
 
 logger = get_logger(__name__)
 
@@ -687,22 +688,25 @@ class DashboardApp:
 # ----------------------------------------------------------------------------
 # HTTP
 # ----------------------------------------------------------------------------
-_NAV_PAGES = {"index.html", "portfolio.html", "watchlist.html", "visuals.html", "technicals.html",
-              "fundamentals.html", "dividends.html", "earnings.html", "sectors.html", "foreign.html",
-              "pulse.html", "bonds.html", "quality.html"}
+# The dashboard's own pages — the same list the sidebar shows.
+_NAV_PAGES = set(NAV_FILES)
 
 _PREPARING_PAGE = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Preparing your dashboard</title>
+<script>(function(){var h=document.documentElement;try{h.setAttribute('data-theme',localStorage.getItem('nse-theme')||
+(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'));}catch(e){}})();</script>
 <style>
-:root{--bg:#f1f5f9;--card:#fff;--text:#1e293b;--muted:#64748b;--bar:#e2e8f0}
-@media (prefers-color-scheme: dark){:root{--bg:#0f172a;--card:#1e293b;--text:#e2e8f0;--muted:#94a3b8;--bar:#334155}}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);margin:0;
-display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;box-sizing:border-box}
-.card{background:var(--card);border-radius:14px;padding:30px 28px;max-width:520px;width:100%;box-shadow:0 8px 30px rgba(0,0,0,.08)}
-h1{font-size:1.3rem;margin:0 0 6px}p{color:var(--muted);line-height:1.5;margin:8px 0}
-.bar{height:10px;border-radius:6px;background:var(--bar);overflow:hidden;margin:18px 0 8px}
-.bar>div{height:100%;width:2%;background:#3b82f6;transition:width .6s ease}
-#step{font-weight:600}.err{color:#dc2626}a{color:#3b82f6}
+:root{--bg:#f5f7fb;--card:#fff;--text:#0f172a;--muted:#5a6a7e;--bar:#e7ecf3;--accent:#4f46e5;--down:#be123c;--border:#e2e8f0}
+:root[data-theme="dark"]{--bg:#0b0f17;--card:#121a27;--text:#e6edf7;--muted:#94a3b8;--bar:#1e2a3d;--accent:#a5b4fc;--down:#fb7185;--border:#233044}
+body{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI Variable Text","Segoe UI",Roboto,sans-serif;
+background:var(--bg);color:var(--text);margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;
+padding:20px;box-sizing:border-box;-webkit-font-smoothing:antialiased}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:30px 28px;max-width:520px;width:100%;
+box-shadow:0 10px 30px rgba(15,23,42,.10)}
+h1{font-size:1.3rem;margin:0 0 6px;letter-spacing:-.01em}p{color:var(--muted);line-height:1.5;margin:8px 0}
+.bar{height:8px;border-radius:999px;background:var(--bar);overflow:hidden;margin:18px 0 8px}
+.bar>div{height:100%;width:2%;background:var(--accent);border-radius:inherit;transition:width .6s ease}
+#step{font-weight:600;color:var(--text)}.err{color:var(--down)!important}a{color:var(--accent)}
 </style></head><body><div class="card"><h1>🇰🇪 Preparing your dashboard…</h1>
 <p>__MESSAGE__</p><div class="bar"><div id="fill"></div></div><p id="step">Checking…</p>
 <p style="font-size:.85rem">This page refreshes by itself — leave it open. The first update of the day takes a few minutes.</p>
