@@ -269,6 +269,16 @@ class TestShell(unittest.TestCase):
         ids = re.findall(r'\sid="([^"]+)"', html)
         self.assertEqual(len(ids), len(set(ids)))
 
+    def test_the_dashboard_is_named_for_everything_it_covers(self):
+        html = self.page(Markup("<p>x</p>"))
+        self.assertIn("<title>T · Finances Dashboard</title>", html)
+        self.assertIn("Finances Dashboard<small>NSE · Bonds · International</small>", html)
+        self.assertNotIn("NSE Dashboard", html)
+        # The saved light/dark choice and Hide amounts keep their old keys, so
+        # the rename doesn't reset anyone's settings.
+        self.assertIn("localStorage.getItem('nse-theme')", html)
+        self.assertIn("localStorage.getItem('nse-hide')", html)
+
     def test_tabs_are_chosen_before_paint_and_old_anchors_still_work(self):
         body = ui.tabs("p", [("summary", "Summary", Markup('<div id="networth">a</div>'), None),
                              ("kenyan", "Kenyan stocks", Markup('<div id="stocks-holdings">b</div>'), None)])

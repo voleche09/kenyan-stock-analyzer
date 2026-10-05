@@ -1,4 +1,4 @@
-# 🇰🇪 Kenyan Stock Analyzer — NSE Daily Dashboard
+# 🇰🇪 Kenyan Stock Analyzer — Finances Dashboard
 
 A fully automated daily stock analysis pipeline for the **Nairobi Securities Exchange (NSE)**. Displays the **NSE official closing price** for each stock (settled after market close), cross-checked against **TradingView**, and uses TradingView for fundamentals and price history. Performs technical and fundamental analysis on all 57+ listed stocks and generates an interactive HTML dashboard with individual stock reports.
 

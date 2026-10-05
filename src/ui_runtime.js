@@ -1,4 +1,4 @@
-/* NSE Dashboard — page behaviour. Inlined into every page by ui_theme.py.
+/* Finances Dashboard — page behaviour. Inlined into every page by ui_theme.py.
 
    Everything here is an enhancement: without it the tabs stack into one
    page with jump links, charts are still drawn, tables are still readable.

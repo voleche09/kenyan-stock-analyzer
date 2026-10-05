@@ -94,6 +94,10 @@ FAVICON = (
     "<rect x='21' y='6' width='5' height='20' rx='1.2' fill='%23ffffff'/>"
     "</svg>\">")
 
+# The dashboard's name (sidebar + every browser tab) and what it covers.
+BRAND = "Finances Dashboard"
+BRAND_TAGLINE = "NSE · Bonds · International"
+
 _BRAND_MARK = ('<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="13" width="4" height="7" rx="1" fill="#c7d2fe"/>'
                '<rect x="10" y="8.5" width="4" height="11.5" rx="1" fill="#e0e7ff"/>'
                '<rect x="16" y="4" width="4" height="16" rx="1" fill="#fff"/></svg>')
@@ -172,12 +176,12 @@ def page(*, title, active_file, subtitle, body, app_head="", app_body="", privat
         '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
         '<meta name="color-scheme" content="light dark">'
         f'<script>{head_script(mapping, default)}</script>'
-        f'{FAVICON}<title>{escape(title)} · NSE Dashboard</title>'
+        f'{FAVICON}<title>{escape(title)} · {escape(BRAND)}</title>'
         f'<style>{css()}{rules}</style>{extra_head}{app_head}</head><body>'
         '<div class="app">'
         '<aside class="sidebar" id="sidebar" aria-label="Main navigation">'
         f'<a class="brand" href="index.html"><span class="brand-mark">{_BRAND_MARK}</span>'
-        '<span>NSE Dashboard<small>Nairobi Securities Exchange</small></span></a>'
+        f'<span>{escape(BRAND)}<small>{escape(BRAND_TAGLINE)}</small></span></a>'
         f'<nav class="nav" aria-label="Pages">{nav_html(active_file)}</nav></aside>'
         '<div class="nav-scrim" aria-hidden="true"></div>'
         '<div class="main">'

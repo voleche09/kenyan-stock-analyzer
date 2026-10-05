@@ -808,7 +808,7 @@ def write_error_page(report_gen, message):
             f'time.</b> {_e(message)}<br>Your watchlist file is untouched. Try updating again; if it keeps happening, '
             f'the details are in logs/analyzer.log.</div>' + _NO_APP_HELP +
             '<div id="wl-add-panel" class="section app-only card card-pad"></div>')
-    html = report_gen._page_shell("NSE — Watchlist", PAGE_FILE, report_gen.page_subtitle(), body)
+    html = report_gen._page_shell("Watchlist", PAGE_FILE, report_gen.page_subtitle(), body)
     return report_gen.write_page(PAGE_FILE, html)
 
 
@@ -845,7 +845,7 @@ def generate_watchlist_page(config, report_gen, analysis_engine, preloaded=None,
             charts[_anchor(view)] = make_charts(view, row["result"].get("data"))
 
     body = render_body(report_gen, views, charts, ctx, load_error=load_error, today=today)
-    html = report_gen._page_shell("NSE — Watchlist", PAGE_FILE, _subtitle(report_gen, ctx), body)
+    html = report_gen._page_shell("Watchlist", PAGE_FILE, _subtitle(report_gen, ctx), body)
     path = report_gen.write_page(PAGE_FILE, html)
     missing = [v["symbol"] for v in views if not v["has_data"]]
     logger.info(f"Watchlist page saved: {len(views)} stock(s)"
