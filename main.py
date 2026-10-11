@@ -365,6 +365,31 @@ def main():
         except Exception as e:
             logger.warning(f"International portfolio tracking skipped: {e}")
 
+        # ---- Mutual funds (private — portfolio/funds.csv + fund_transactions.csv, gitignored) ----
+        # Prices: each fund manager's own published prices per unit, checked
+        # day by day against FT (fund_data.py). Monthly top-ups and payouts are
+        # written to fund_transactions.csv automatically — each exactly once
+        # (funds_portfolio.py). Skipped entirely if there's no funds.csv.
+        funds_summary = None
+        fund_market = {}
+        try:
+            import funds_portfolio as funds_mod
+            import fund_data
+            funds = funds_mod.load_funds(config.portfolio_dir)
+            if funds:
+                logger.info(f"Funds: {len(funds)} fund(s)")
+                fund_market = fund_data.fetch_all(funds, config.cache_dir, force=args.force_refresh)
+                for change in funds_mod.sync_transactions(config.portfolio_dir, funds, fund_market):
+                    logger.info(f"Funds: {change}")
+                funds_summary = funds_mod.compute_fund_portfolio(
+                    funds, funds_mod.load_transactions(config.portfolio_dir), fund_market, usd_kes)
+                for w in funds_summary["warnings"]:
+                    logger.warning(f"Funds: {w}")
+                if funds_summary["missing"]:
+                    logger.warning(f"Funds: no price today for {', '.join(funds_summary['missing'])}")
+        except Exception as e:
+            logger.warning(f"Fund tracking skipped: {e}")
+
         # ---- Individual reports (only if --detailed) ----
         # Your own holdings (private) add a "Your position" strip to their
         # stock's page and mark your average cost on its charts.
@@ -442,6 +467,13 @@ def main():
             logger.info("Exporting to Excel...")
             report_gen.export_to_excel(analysis_results, sector_data, breadth)
 
+        # ---- One private page per fund (fund_<ISIN>.html), linked from My Portfolio ----
+        if funds_summary:
+            try:
+                report_gen.generate_fund_pages(funds_summary, fund_market)
+            except Exception as e:
+                logger.warning(f"Fund pages skipped: {e}")
+
         # ---- INDEX DASHBOARD (the main entry point) ----
         logger.info("Generating index dashboard...")
         index_path = report_gen.generate_index(
@@ -465,6 +497,7 @@ def main():
             intl_analysis_results=intl_analysis_results,
             intl_fundamentals_data=intl_fundamentals_data,
             watchlist_count=watchlist_count(config.portfolio_dir),
+            funds_summary=funds_summary,
         )
 
         # ---- ⭐ Watchlist page (private — portfolio/watchlist.csv, gitignored) ----

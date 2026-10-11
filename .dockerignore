@@ -27,6 +27,9 @@ portfolio/international_history.json
 # templates are allowed through.
 portfolio/*.csv
 !portfolio/*.example.csv
+# Same catch-all for JSON (mutual funds, their history, anything new).
+portfolio/*.json
+!portfolio/*.example.json
 # Safety copies the dashboard app takes before removing/editing a row — same private data.
 portfolio/backups/
 

@@ -28,7 +28,7 @@
   --warn: #b45309; --warn-soft: #fef5e6;
   --info: #0369a1; --info-soft: #e9f4fc;
   --good: #047857; --fair: #b45309; --weak: #be123c;
-  --c-stocks: #4f46e5; --c-bonds: #0d9488; --c-intl: #d97706;
+  --c-stocks: #4f46e5; --c-bonds: #0d9488; --c-intl: #d97706; --c-funds: #c026d3;
   --c1: #4f46e5; --c2: #0d9488; --c3: #d97706; --c4: #db2777; --c5: #0891b2; --c6: #7c3aed; --c7: #65a30d;
   --tip-bg: #0f172a; --tip-text: #f1f5f9;
   --heat-0: #e8edf3; --heat-up: #059669; --heat-down: #e11d48; --heat-none: #cbd5e1;   /* heatmaps */
@@ -62,7 +62,7 @@
   --warn: #fbbf24; --warn-soft: rgba(251, 191, 36, .13);
   --info: #7dd3fc; --info-soft: rgba(125, 211, 252, .12);
   --good: #34d399; --fair: #fbbf24; --weak: #fb7185;
-  --c-stocks: #818cf8; --c-bonds: #2dd4bf; --c-intl: #fbbf24;
+  --c-stocks: #818cf8; --c-bonds: #2dd4bf; --c-intl: #fbbf24; --c-funds: #e879f9;
   --c1: #a5b4fc; --c2: #5eead4; --c3: #fcd34d; --c4: #f9a8d4; --c5: #67e8f9; --c6: #c4b5fd; --c7: #bef264;
   --tip-bg: #e6edf7; --tip-text: #0b0f17;
   --heat-0: #1f2a3b; --heat-up: #34d399; --heat-down: #fb7185; --heat-none: #2b3445;
@@ -296,6 +296,7 @@ table.data tr.is-extra, table.data tr.is-filtered { display: none; }
 .wbar[data-tone="stocks"] i { background: var(--c-stocks); }
 .wbar[data-tone="bonds"] i { background: var(--c-bonds); }
 .wbar[data-tone="intl"] i { background: var(--c-intl); }
+.wbar[data-tone="funds"] i { background: var(--c-funds); }
 .rbar { display: inline-flex; flex-direction: column; gap: 3px; width: 100%; min-width: 120px; }
 .rbar-track { position: relative; height: 6px; border-radius: 3px; background: linear-gradient(90deg, var(--down-soft), var(--surface-2), var(--up-soft)); }
 .rbar-now { position: absolute; top: 50%; width: 12px; height: 12px; margin: -6px 0 0 -6px; border-radius: 50%;
@@ -421,6 +422,7 @@ table.data tr.is-extra, table.data tr.is-filtered { display: none; }
 .seg.stocks, .sw.stocks { stroke: var(--c-stocks); background: var(--c-stocks); }
 .seg.bonds, .sw.bonds { stroke: var(--c-bonds); background: var(--c-bonds); }
 .seg.intl, .sw.intl { stroke: var(--c-intl); background: var(--c-intl); }
+.seg.funds, .sw.funds { stroke: var(--c-funds); background: var(--c-funds); }
 .seg.c1, .sw.c1 { stroke: var(--c1); background: var(--c1); } .seg.c2, .sw.c2 { stroke: var(--c2); background: var(--c2); }
 .seg.c3, .sw.c3 { stroke: var(--c3); background: var(--c3); } .seg.c4, .sw.c4 { stroke: var(--c4); background: var(--c4); }
 .seg.c5, .sw.c5 { stroke: var(--c5); background: var(--c5); } .seg.c6, .sw.c6 { stroke: var(--c6); background: var(--c6); }
@@ -982,6 +984,58 @@ small.block { display: block; }
 }
 @media (hover: none) { .chart-plot { cursor: default; } }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; scroll-behavior: auto !important; } }
+
+/* ------------------------------------------------------------------ mutual funds */
+.s-f1 { --lg-c: var(--c1); stroke: var(--c1); fill: var(--c1); }
+.s-f2 { --lg-c: var(--c3); stroke: var(--c3); fill: var(--c3); }
+.s-f3 { --lg-c: var(--c5); stroke: var(--c5); fill: var(--c5); }
+.s-f4 { --lg-c: var(--c6); stroke: var(--c6); fill: var(--c6); }
+.s-f5 { --lg-c: var(--c2); stroke: var(--c2); fill: var(--c2); }
+.s-f6 { --lg-c: var(--c7); stroke: var(--c7); fill: var(--c7); }
+.s-f7 { --lg-c: var(--c4); stroke: var(--c4); fill: var(--c4); }
+.s-you { --lg-c: var(--c-funds); stroke: var(--c-funds); fill: var(--c-funds); }
+.chart-svg .ln.s-you { stroke-width: 2.8; }
+.s-putin { --lg-c: var(--text-muted); stroke: var(--text-muted); fill: var(--text-muted); stroke-dasharray: 5 4; }
+.chart-svg .bar.s-payout { fill: var(--c-funds); opacity: .85; }
+.s-payout { --lg-c: var(--c-funds); }
+.heat-chip { display: inline-block; min-width: 60px; padding: 2px 8px; border-radius: 6px; text-align: right;
+             font-weight: 650; font-size: 13px; white-space: nowrap; }
+.fund-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.fund-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; color: var(--text); background: var(--card-bg);
+             border: 1px solid var(--border); border-top: 4px solid var(--fc, var(--c-funds)); border-radius: var(--radius);
+             transition: transform .08s ease, box-shadow .08s ease; }
+.fund-card:hover { text-decoration: none; transform: translateY(-2px); box-shadow: var(--shadow-2); }
+.fund-card[data-c="c1"] { --fc: var(--c1); } .fund-card[data-c="c3"] { --fc: var(--c3); }
+.fund-card[data-c="c5"] { --fc: var(--c5); } .fund-card[data-c="c6"] { --fc: var(--c6); }
+.fund-card[data-c="c2"] { --fc: var(--c2); } .fund-card[data-c="c7"] { --fc: var(--c7); }
+.fund-card[data-c="c4"] { --fc: var(--c4); }
+.fc-head { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; }
+.fc-name b { display: block; font-size: 15px; line-height: 1.3; }
+.fc-name small { display: block; margin-top: 2px; color: var(--text-muted); font-size: 12px; }
+.fc-price { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.fc-price .num { font-size: 22px; font-weight: 750; letter-spacing: -.01em; }
+.fc-price small { color: var(--text-muted); font-size: 12px; }
+.fc-stats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 14px; font-size: 13.5px; }
+.fc-stats span { display: block; color: var(--text-muted); font-size: 11.5px; }
+.fc-stats b { font-variant-numeric: tabular-nums; }
+.fc-stats b[data-tone="up"], .tone-up { color: var(--up); }
+.fc-stats b[data-tone="down"], .tone-down { color: var(--down); }
+.fc-returns { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; font-size: 12px; color: var(--text-muted); }
+.fc-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; padding-top: 8px;
+           border-top: 1px dashed var(--border); color: var(--text-muted); font-size: 12.5px; }
+.fc-open { color: var(--accent); font-weight: 650; }
+.plain-list { margin: 0; padding-left: 20px; }
+.plain-list li { margin: 7px 0; line-height: 1.55; }
+.plain-list li::marker { color: var(--c-funds); }
+.fund-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 10px 18px; margin: 0; }
+.fund-facts div { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.fund-facts dt { color: var(--text-muted); font-size: 12px; }
+.fund-facts dd { margin: 2px 0 0; font-weight: 600; }
+.risk-dots { display: inline-flex; gap: 3px; vertical-align: middle; }
+.risk-dots i { width: 12px; height: 12px; border-radius: 3px; background: var(--surface-2); border: 1px solid var(--border); }
+.risk-dots i.on { background: var(--c-funds); border-color: var(--c-funds); }
+.row-you td { background: color-mix(in srgb, var(--c-funds) 9%, transparent); font-weight: 650; }
+.sub-h { margin: 20px 0 8px; font-size: 14px; font-weight: 700; color: var(--text-2); }
 
 /* ------------------------------------------------------------------ print */
 @media print {

@@ -1,0 +1,3 @@
+isin,name,units,avg_cost,as_of,statement_nav,currency,payouts,monthly_amount,monthly_day,fee_pct,peers,factsheet_url,note
+XS9000000018,Sample Global Bond Income Fund A (USD) Dist,400,9.80,2026-03-31,9.9120,USD,reinvest,50,15,2,XS9000000109;XS9000000117,,made-up example — copy your own statement's figures
+XS9000000026,Sample US Equity Growth Fund A (USD) Acc,30,150.00,2026-03-31,152.4400,USD,none,,,2,,,made-up example

@@ -134,6 +134,77 @@ _TERMS = {
     "performance": ("Price performance", "How much the share price changed over each period. Dividends are not "
                     "included."),
     "ttm": ("TTM", "Trailing twelve months: the latest full year of results, whenever the company's year ends."),
+    # ---- mutual funds ----
+    "mutual-fund": ("Mutual fund", "A pot of money from many investors that professional managers invest for "
+                    "them — in shares, bonds or other funds. You own units of the pot, so one purchase spreads your "
+                    "money over hundreds of investments."),
+    "nav": ("NAV (price per unit)", "Net asset value: everything the fund owns, minus its costs, divided by the "
+            "number of units. The fund publishes it once each working day — it's the price you buy and sell at "
+            "(before any sales charge)."),
+    "units": ("Units", "Your share of a fund, like shares in a company. Your money's value = units × today's price "
+              "per unit. Each top-up buys more units; a reinvested payout does too."),
+    "avg-unit-cost": ("Average unit cost", "Everything you paid in ÷ the units you hold — including the sales "
+                      "charge, because that money left your account. Reinvested payouts add units for free, which "
+                      "brings this figure down."),
+    "fund-payout": ("Payout (distribution)", "Cash an income fund pays out to its investors, usually monthly. On the "
+                    "'ex-date' the price per unit drops by the payout, because that money leaves the fund — you "
+                    "haven't lost it, it's paid to you or bought you more units."),
+    "reinvest": ("Reinvested payouts", "Instead of paying the payout into your account, the bank uses it to buy "
+                 "more units of the same fund, at that day's price. Your units grow; no new money goes in."),
+    "accumulating": ("Accumulating fund", "A fund that never pays out: its income stays inside and makes the price "
+                     "per unit grow instead. Its price change IS its total return."),
+    "sales-charge": ("Sales charge", "A fee taken from each purchase before units are bought — e.g. 2% of a $50 "
+                     "top-up is $1, so $49 buys units. It's charged once, when you buy."),
+    "ongoing-charge": ("Ongoing charges (OCF)", "What the fund costs to run each year, as a % of your money — taken "
+                       "out of the fund's price every day, so the returns shown are already after it. Lower is "
+                       "better: 1% a year is $100 on every $10,000."),
+    "annualised-return": ("Yearly return (annualised)", "The average yearly growth over a longer period: +10% a year "
+                          "over 3 years means $10,000 grew like 10% every year (to about $13,310), even if the "
+                          "actual years went up and down."),
+    "fund-total-return": ("Total return", "The price change plus every payout, as if each payout had bought more "
+                          "units on the day it was paid — the way fund managers report performance, so funds that "
+                          "pay out and funds that don't compare fairly."),
+    "calendar-return": ("Calendar-year return", "How much the fund made or lost from 1 January to 31 December of each "
+                        "year (total return). Shows how bumpy the ride has been."),
+    "volatility": ("Volatility", "How much the price swings, as a yearly %. Around 10% means a normal year's value "
+                   "moves within about ±10% of its trend; higher means a bumpier ride."),
+    "max-drawdown": ("Biggest fall (max drawdown)", "The largest drop from a high point to the low that followed, "
+                     "in the period shown. It answers: 'how bad did it get for someone who bought at the top?'"),
+    "risk-class": ("Risk class (1–7)", "Europe's standard risk scale for funds, 1 = lowest, 7 = highest. 'Official' is "
+                   "the class in the fund's key information document (SRI); 'From its price' is worked out here from "
+                   "how much weekly returns swung over up to 5 years, in the regulators' fixed bands (SRRI), so every "
+                   "fund is measured the same way."),
+    "peer-funds": ("Competitors (peer funds)", "Other funds in the same category that a bank could have offered you "
+                   "instead. Compared on their accumulating share classes, so payouts are included for everyone."),
+    "fund-category": ("Category", "The group a fund-rating company (Morningstar) puts the fund in by what it holds — "
+                      "e.g. 'Asia Allocation' = a mix of Asian shares and bonds. Funds are fairest compared with "
+                      "their own category."),
+    "multi-asset": ("Multi-asset fund", "A fund that mixes shares, bonds and sometimes other things (gold, cash, "
+                    "futures) and changes the mix as markets change — one fund instead of choosing each part "
+                    "yourself."),
+    "asset-mix": ("Asset mix", "What the fund holds: shares (growth, bumpier), bonds (income, steadier), cash, gold. "
+                  "Funds that use futures can show more than 100% in one part and a negative cash figure — that's "
+                  "borrowed exposure, not an error."),
+    "top-up": ("Monthly top-up", "A standing instruction: the bank invests a fixed amount on the same day each "
+               "month. The dashboard records it automatically, once per month, and works out the units from that "
+               "day's price after the sales charge."),
+    "estimated-units": ("Estimated units", "Units the dashboard worked out itself (amount after the sales charge ÷ "
+                        "the price for the dealing day). Your bank's statement is the final word — copy its units "
+                        "into the transaction and mark it confirmed."),
+    "your-annual-return": ("Your yearly return", "Your own money's growth rate, counting WHEN each top-up went in and "
+                           "each payout came out (a money-weighted return, like a savings rate). Shown once you've "
+                           "tracked a fund for 3 months."),
+    "fund-size": ("Fund size", "How much money the whole fund manages. Very small funds can close; very large ones "
+                  "are well established."),
+    "distribution-yield": ("Payout yield", "The last 12 months of payouts per unit ÷ today's price. It's income, but "
+                           "income funds may pay part of it out of the fund's own capital — compare it with the "
+                           "total return."),
+    "price-cross-check": ("Price check", "The fund's prices come from two independent places (the fund manager and "
+                          "the Financial Times) and are compared day by day; any difference is shown, never hidden. "
+                          "Your statement's price is checked too."),
+    "profit-periods": ("Profit by day, week and month", "How much your units made or lost in US dollars: units held × "
+                       "the change in price per unit, plus payouts. Top-ups are not profit, so they're left out, "
+                       "and the sales charge counts as a small loss on the day it's taken."),
 }
 
 # Company figures — the stock pages' existing explanations, reused as-is.

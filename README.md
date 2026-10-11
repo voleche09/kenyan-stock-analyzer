@@ -16,7 +16,8 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **Similar stocks** — peer comparison by sector, market cap, and valuation
 - **Sector performance** — sector-by-sector breakdown with average returns
 - **Market breadth** — advance/decline, % above SMA50, bullish MACD ratio
-- **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds and US-listed stocks, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
+- **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds, US-listed stocks and mutual funds, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
+- **🏦 Mutual funds** — funds you hold through your bank, priced every run at the fund's published price per unit (from the fund manager's own data where it can be read directly, otherwise the Financial Times' fund data) and checked day by day against a second source. Your value, gain and today's move; profit by day, week and month; returns over every period and calendar year with payouts included (reconciled with the managers' published figures); payouts and payout yield; what each fund holds; how it compares with its competitors; news. Monthly top-ups and payouts are recorded automatically — exactly once each — with the bank's sales charge taken off, and you confirm the units when your statement arrives — see [Mutual funds](#-mutual-funds)
 - **⭐ Watchlist — NSE and international** — follow any Nairobi stock or any stock Yahoo Finance lists (US, London, Johannesburg, …) on its own page: a chart with *your* buy/sell prices drawn in, a plain-English signal checklist (trend, momentum, valuation, analysts, dividend), "needs your attention" alerts, key dates and news — see [Watchlist](#-watchlist)
 - **Click-to-add dashboard app** — double-click `Open Dashboard.command`: search for a stock by name, add it to your watchlist, record a purchase, fix a mistake, update the data — no files to edit, no commands to type
 - **Excel export** — multi-sheet workbook with all data
@@ -95,7 +96,19 @@ cp portfolio/holdings.example.csv portfolio/holdings.csv   # then edit it in Exc
 ./run.sh                                                    # the 💼 My Portfolio tab fills in
 ```
 
-There are separate templates for US-listed stocks (`international_holdings.example.csv`, USD) and Kenya bonds (`bonds.example.csv`). Your real files are gitignored and kept out of Docker images automatically. Full guide — columns, accepted formats, saving from Excel/Numbers/Sheets, switching from the older JSON files: [`portfolio/README.md`](portfolio/README.md).
+There are separate templates for US-listed stocks (`international_holdings.example.csv`, USD), Kenya bonds (`bonds.example.csv`) and mutual funds (`funds.example.csv`, USD). Your real files are gitignored and kept out of Docker images automatically. Full guide — columns, accepted formats, saving from Excel/Numbers/Sheets, switching from the older JSON files: [`portfolio/README.md`](portfolio/README.md).
+
+### 🏦 Mutual funds
+
+Copy the figures from your bank statement into `portfolio/funds.csv` (template: `portfolio/funds.example.csv`) — or let the helper check the fund and add the row for you:
+
+```bash
+./venv/bin/python3 fund.py add ISIN UNITS AVG_COST --as-of YYYY-MM-DD --nav PRICE --name "Fund name" --payouts reinvest --monthly 50 --day 15 --fee 2
+./venv/bin/python3 fund.py list                       # what's recorded, including automatic top-ups and payouts
+./venv/bin/python3 fund.py confirm ISIN REF UNITS     # your statement arrived: its units for an automatic row
+```
+
+Each run then fetches every fund's prices, adds the month's top-up (and any payout) to `portfolio/fund_transactions.csv` once, and fills in **💼 My Portfolio → Funds** plus a private page per fund. The funds count in your net worth (converted at the day's USD/KES rate). Full column guide: [`portfolio/README.md`](portfolio/README.md#mutual-funds--fundscsv-and-fund_transactionscsv-usd).
 
 ### ⭐ Watchlist
 
@@ -429,7 +442,10 @@ kenyan_stock_analyzer/
 │   ├── history_tracker.py      # Appends a daily snapshot for later accuracy review
 │   ├── report_generator.py     # HTML/PDF reports, Excel export, the market pages, summary PDF
 │   ├── page_overview.py        # The 🏠 Overview page
-│   ├── page_portfolio.py       # The 💼 My Portfolio page (five tabs) + the net-worth arithmetic
+│   ├── page_portfolio.py       # The 💼 My Portfolio page (six tabs) + the net-worth arithmetic
+│   ├── page_funds.py           # The Funds tab and each fund's own page
+│   ├── funds_portfolio.py      # Your mutual funds: units, top-ups, payouts, returns (private)
+│   ├── fund_data.py            # Fund prices, payouts and facts by ISIN (fund managers + FT)
 │   ├── page_stock.py           # Every stock's own page (NSE and international)
 │   ├── ui_theme.py             # The page shell shared by every page (+ ui_theme.css, ui_runtime.js)
 │   ├── ui_kit.py               # Small building blocks: headline figures, tabs, tables, ⓘ buttons…
@@ -469,6 +485,8 @@ All fundamental and technical data is sourced from **TradingView** via the `tvki
 | Fundamental metrics | TradingView | Scanner API (Kenya market) |
 | Daily price list (fallback) | NSE PDF | OCR via `pdf2image` + `pytesseract` |
 | Historical data (fallback) | Yahoo Finance | `yfinance` |
+| Mutual fund prices and payouts | The fund manager's website where supported, cross-checked with the Financial Times | public fund-data pages / JSON |
+| Mutual fund facts and holdings | Financial Times fund pages | HTML |
 
 ## Metrics Included
 

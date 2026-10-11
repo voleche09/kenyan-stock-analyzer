@@ -68,6 +68,11 @@ portfolio/international_history.json
 # default. Only the *.example.csv templates are tracked.
 portfolio/*.csv
 !portfolio/*.example.csv
+# The same catch-all for JSON: mutual funds, their transaction log and value
+# history (funds.*, fund_transactions.*, funds_history.json) and any future
+# file are private by default. Only the *.example.json templates are tracked.
+portfolio/*.json
+!portfolio/*.example.json
 
 # Automatic safety copies the dashboard app takes before it removes or edits a
 # row in one of your portfolio files — the same private data, so never committed.
