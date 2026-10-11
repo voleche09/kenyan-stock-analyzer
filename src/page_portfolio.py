@@ -1,6 +1,6 @@
 """
-💼 My Portfolio — one private page with five tabs instead of 23 stacked
-sections: Summary · Kenyan stocks · Bonds · International · News.
+💼 My Portfolio — one private page with six tabs instead of 23 stacked
+sections: Summary · Kenyan stocks · Bonds · International · Funds · News.
 
 Everything the old page showed is still here, laid out tighter (see the
 information map in the redesign plan); the Summary tab adds a combined view
@@ -26,6 +26,7 @@ import ui_kit as ui
 # Old section anchors, kept so bookmarks and the app's links still land:
 # stocks-top/charts/holdings/dividends, bonds-top/charts/detail/calendar,
 # intl-top/charts/holdings/dividends, and stocks-news / intl-news (News tab).
+# Funds: funds-top/profit/cards/compare/charts/plan/add, funds-news (News tab).
 
 
 # ------------------------------------------------------------------ formatting
@@ -60,19 +61,22 @@ def _join(parts):
 
 
 # ------------------------------------------------------------------ the combined picture
-def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=None, usd_kes=None):
+def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=None, usd_kes=None,
+                     funds_summary=None):
     """Everything you own, added up in KES — the same arithmetic the old
     "at a glance" hero used (bonds at indicative par value; international
-    converted at this run's rate, or left out of the KES total without one).
-    Returns None when nothing has been set up yet."""
+    shares and mutual funds converted at this run's rate, or left out of the
+    KES total without one). Returns None when nothing has been set up yet."""
     has_stocks, has_bonds, has_intl = bool(portfolio_summary), bool(bond_portfolio), bool(intl_portfolio_summary)
-    if not (has_stocks or has_bonds or has_intl):
+    has_funds = bool(funds_summary)
+    if not (has_stocks or has_bonds or has_intl or has_funds):
         return None
     st = portfolio_summary["totals"] if has_stocks else {}
     bt = bond_portfolio["totals"] if has_bonds else {}
     it = intl_portfolio_summary["totals"] if has_intl else {}
+    ft = funds_summary["totals"] if has_funds else {}
     rate = (usd_kes or {}).get("rate")
-    fx_missing = has_intl and not rate
+    fx_missing = (has_intl or has_funds) and not rate
 
     stocks = {"value": st.get("market_value") or 0.0, "cost": st.get("cost_basis") or 0.0,
               "gain": st.get("gain") or 0.0, "day_pct": st.get("day_change_pct"),
@@ -91,18 +95,30 @@ def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=N
         intl.update(value_kes=None if has_intl else 0.0, cost_kes=None if has_intl else 0.0,
                     day_value_kes=None, dividend_kes=None if has_intl else 0.0)
 
-    total = stocks["value"] + bonds["value"] + (intl["value_kes"] or 0.0)
-    cost = stocks["cost"] + bonds["cost"] + (intl["cost_kes"] or 0.0)
+    funds = {"value_usd": ft.get("market_value") or 0.0, "cost_usd": ft.get("invested") or 0.0,
+             "gain_usd": ft.get("gain") or 0.0, "day_pct": ft.get("day_change_pct"),
+             "day_value_usd": ft.get("day_change_value"), "income_usd": ft.get("est_annual_income") or 0.0}
+    if has_funds and rate:
+        funds.update(value_kes=funds["value_usd"] * rate, cost_kes=funds["cost_usd"] * rate,
+                     day_value_kes=(funds["day_value_usd"] * rate if funds["day_value_usd"] is not None else None),
+                     income_kes=funds["income_usd"] * rate)
+    else:
+        funds.update(value_kes=None if has_funds else 0.0, cost_kes=None if has_funds else 0.0,
+                     day_value_kes=None, income_kes=None if has_funds else 0.0)
+
+    total = stocks["value"] + bonds["value"] + (intl["value_kes"] or 0.0) + (funds["value_kes"] or 0.0)
+    cost = stocks["cost"] + bonds["cost"] + (intl["cost_kes"] or 0.0) + (funds["cost_kes"] or 0.0)
     gain = total - cost
 
-    # Today: only stocks and international move day to day (bonds have no
-    # daily price here), so the % is of yesterday's total net worth.
+    # Today: only stocks, international and funds move day to day (bonds have
+    # no daily price here), so the % is of yesterday's total net worth.
     day_parts = [v for v in (stocks["day_value"] if has_stocks else None,
-                             intl["day_value_kes"] if has_intl else None) if v is not None]
+                             intl["day_value_kes"] if has_intl else None,
+                             funds["day_value_kes"] if has_funds else None) if v is not None]
     day_value = sum(day_parts) if day_parts else None
     day_pct = (day_value / (total - day_value) * 100.0) if (day_value is not None and total - day_value) else None
     ups = downs = 0
-    for summary in (portfolio_summary, intl_portfolio_summary):
+    for summary in (portfolio_summary, intl_portfolio_summary, funds_summary):
         for h in (summary or {}).get("holdings", []):
             c = h.get("day_change_pct") if h.get("data_available") else None
             if c is not None:
@@ -111,7 +127,7 @@ def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=N
 
     share = (lambda v: v / total * 100.0) if total else (lambda v: 0.0)
     return {
-        "has_stocks": has_stocks, "has_bonds": has_bonds, "has_intl": has_intl,
+        "has_stocks": has_stocks, "has_bonds": has_bonds, "has_intl": has_intl, "has_funds": has_funds,
         "fx_rate": rate, "fx_missing": fx_missing,
         "fx_as_of": ((intl_portfolio_summary or {}).get("fx_as_of") if has_intl else None)
         or (usd_kes or {}).get("updated", ""),
@@ -121,8 +137,9 @@ def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=N
         "stocks": dict(stocks, share=share(stocks["value"])),
         "bonds": dict(bonds, share=share(bonds["value"])),
         "intl": dict(intl, share=share(intl["value_kes"] or 0.0)),
+        "funds": dict(funds, share=share(funds["value_kes"] or 0.0)),
         "dividends_kes": stocks["dividend"] + (intl["dividend_kes"] or 0.0),
-        "dividends_intl_unconverted_usd": intl["dividend_usd"] if fx_missing else None,
+        "dividends_intl_unconverted_usd": intl["dividend_usd"] if (has_intl and not rate) else None,
     }
 
 
@@ -205,13 +222,15 @@ def _upcoming(when, today):
 
 # ------------------------------------------------------------------ Summary tab
 def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_summary, fundamentals,
-                 intl_fundamentals, nse_history, intl_history, today):
+                 intl_fundamentals, nse_history, intl_history, today, funds_summary=None):
     if nw is None:
-        return ui.empty_state("Nothing here yet", "Add your Kenyan shares, bonds or international shares — "
+        return ui.empty_state("Nothing here yet", "Add your Kenyan shares, bonds, international shares or funds — "
                               "see the tabs above for how — and this summary fills in.", icon="briefcase")
     rate = nw["fx_rate"]
+    fs = funds_summary
     attention = []
-    for label, summary in (("Kenyan stocks", portfolio_summary), ("International", intl_portfolio_summary)):
+    for label, summary in (("Kenyan stocks", portfolio_summary), ("International", intl_portfolio_summary),
+                           ("Funds", fs)):
         miss = (summary or {}).get("missing_symbols") or []
         if miss:
             attention.append(f"{label}: no live data today for {', '.join(miss)} — left out of the totals.")
@@ -228,7 +247,8 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
     kpis = [
         ui.kpi("Total net worth", f"KES {nw['total']:,.0f}", big=True, private=True, term="net-worth",
                delta_html=ui.delta(nw["day_pct"]) if nw["day_pct"] is not None else None,
-               sub=" · ".join(x for x in (usd_line, "stocks + bonds + international, today") if x)),
+               sub=" · ".join(x for x in (usd_line, "stocks + bonds + international"
+                                          + (" + funds" if nw["has_funds"] else "") + ", today") if x)),
         ui.kpi("Today", money(nw["day_value"], sign=True) if nw["day_value"] is not None else "—",
                tone=tone(nw["day_value"]), private=True, term="day-change",
                sub=f'{nw["ups"]} up · {nw["downs"]} down · bonds don\'t move daily'),
@@ -248,14 +268,24 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
         elif nw["has_intl"] and nw["intl"]["dividend_kes"]:
             div_sub = (f'Kenyan KES {nw["stocks"]["dividend"]:,.0f} · international '
                        f'${nw["intl"]["dividend_usd"]:,.0f}')
+        if nw["has_funds"] and nw["funds"]["income_usd"]:
+            fi = nw["funds"]
+            div_sub = " · ".join(x for x in (div_sub, "+ fund payouts " + (
+                f'KES {fi["income_kes"]:,.0f}' if fi["income_kes"] is not None else f'${fi["income_usd"]:,.0f}')
+                + "/yr") if x)
         kpis.append(ui.kpi("Dividends a year (before tax)", money(nw["dividends_kes"]), private=True,
                            term="est-dividend", sub=div_sub))
+    elif nw["has_funds"] and nw["funds"]["income_usd"]:
+        fi = nw["funds"]
+        kpis.append(ui.kpi("Fund payouts a year", money(fi["income_kes"]) if fi["income_kes"] is not None
+                           else money(fi["income_usd"], "USD"), private=True, term="fund-payout"))
     parts.append(ui.kpi_row(kpis, cls="kpis-summary"))
     if rate:
         parts.append(Markup(f'<p class="footnote">USD/KES {rate:.2f}'
                             + (f" · {escape(nw['fx_as_of'])}" if nw["fx_as_of"] else "") + "</p>"))
     if nw["fx_missing"]:
-        parts.append(ui.banner("⚠️ * FX rate unavailable this run — international holdings are shown in USD only "
+        parts.append(ui.banner("⚠️ * FX rate unavailable this run — international holdings"
+                               + (" and funds" if nw["has_funds"] else "") + " are shown in USD only "
                                "and excluded from the combined KES total above (not guessed at a stale rate).",
                                tone="warn"))
 
@@ -267,6 +297,8 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
         segs.append(("Bonds", nw["bonds"]["value"], "bonds"))
     if nw["has_intl"] and nw["intl"]["value_kes"] is not None:
         segs.append(("International", nw["intl"]["value_kes"], "intl"))
+    if nw["has_funds"] and nw["funds"]["value_kes"] is not None:
+        segs.append(("Funds", nw["funds"]["value_kes"], "funds"))
     donut = sc.donut("c-pf-alloc", segs, title="Where your money is", fmt=sc.Fmt("KES ", 0),
                      center_value=sc._short_num(nw["total"]), center_label="net worth",
                      legend_values=False)              # the amounts are in "Your three parts", beside it
@@ -274,8 +306,11 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
         '<p class="footnote">🔵 Stocks (real, verified market price) &nbsp; 🟢 Bonds (indicative par value — '
         "Kenya's secondary bond market has no live retail quote feed, so this assumes each bond is worth face "
         "value; see the bonds section for the honest yield-sensitivity lookup) &nbsp; 🟠 International (real, "
-        'verified market price, converted from USD at the rate shown above). "Today" applies to stocks and '
-        "international holdings; bonds don't reprice daily in this model.</p>")
+        'verified market price, converted from USD at the rate shown above). '
+        + ("🟣 Funds (each fund manager's published price per unit, converted from USD the same way). "
+           if nw["has_funds"] else "")
+        + '"Today" applies to stocks and international holdings' + (" and funds" if nw["has_funds"] else "")
+        + "; bonds don't reprice daily in this model.</p>")
     alloc_card = ui.card(_join([donut, legend_note]), title="Where your money is", term="allocation", icon="pie")
 
     part_blocks = []
@@ -324,30 +359,47 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
         part_blocks.append(Markup('<div class="part"><h4><i class="sw intl"></i>International</h4><p class="muted small">'
                                   'None added yet — add a row to <code>portfolio/international_holdings.csv</code>'
                                   '</p></div>'))
-    parts_card = ui.card(Markup(f'<div class="part-grid">{_join(part_blocks)}</div>'), title="Your three parts",
-                         icon="layers")
+    if nw["has_funds"]:
+        fd = nw["funds"]
+        kes_sub = (f'<small>KES {fd["value_kes"]:,.0f}</small>' if fd["value_kes"] is not None else "")
+        part_blocks.append(_join([
+            '<div class="part"><h4><i class="sw funds"></i>Funds<a class="part-link" href="#funds">Open ›</a></h4>',
+            _part_row("Market value", None, kpi_label="Funds · Market value",
+                      html=Markup(f"${fd['value_usd']:,.0f}{kes_sub}")),
+            _part_row("Gain / loss", money(fd["gain_usd"], "USD", sign=True), kpi_label="Funds · Gain / loss",
+                      tone_=tone(fd["gain_usd"])),
+            _part_row("Today", pct(fd["day_pct"], 2), kpi_label="Funds · Today", tone_=tone(fd["day_pct"]),
+                      private=False),
+            _part_row("Share of net worth", f"{fd['share']:.0f}%" + (" *" if nw["fx_missing"] else ""),
+                      kpi_label="Funds · Share of net worth", private=False), "</div>"]))
+    parts_card = ui.card(Markup(f'<div class="part-grid">{_join(part_blocks)}</div>'),
+                         title="Your four parts" if nw["has_funds"] else "Your three parts", icon="layers")
     parts.append(Markup(f'<div class="grid-2 summary-mid">{alloc_card}{parts_card}</div>'))
 
     # ---- insights
     parts.append(Markup('<div class="grid-3 insights">'
-                        + str(_moves_card(rg, nw, portfolio_summary, intl_portfolio_summary))
+                        + str(_moves_card(rg, nw, portfolio_summary, intl_portfolio_summary, fs))
                         + str(_coming_up_card(bond_portfolio, portfolio_summary, intl_portfolio_summary,
-                                              fundamentals, intl_fundamentals, today))
-                        + str(_worth_knowing_card(nw, portfolio_summary, intl_portfolio_summary))
+                                              fundamentals, intl_fundamentals, today, fs))
+                        + str(_worth_knowing_card(nw, portfolio_summary, intl_portfolio_summary, fs))
                         + "</div>"))
 
     # ---- everything you own
     parts.append(_everything_table(rg, nw, portfolio_summary, bond_portfolio, intl_portfolio_summary,
-                                   nse_history, intl_history, fundamentals))
+                                   nse_history, intl_history, fundamentals, fs))
     parts.append(Markup('<p class="footnote">Information, not financial advice — each tab has the full note on '
                         'where its figures come from. These files are never committed to git.</p>'))
     return _join(parts)
 
 
-def _moves_card(rg, nw, ps, ips):
+def _moves_card(rg, nw, ps, ips, fs=None):
     """Today's biggest moves in shillings (quantity × today's change)."""
     rate = nw["fx_rate"]
     moves = []
+    for h in (fs or {}).get("funds", []):
+        if h.get("data_available") and h.get("day_change_value") is not None:
+            v = h["day_change_value"] * rate if rate else h["day_change_value"]
+            moves.append((h["name"], v, h.get("day_change_pct"), "KES" if rate else "USD"))
     for h in (ps or {}).get("holdings", []):
         if h.get("data_available") and h.get("day_change_value") is not None:
             moves.append((h["symbol"], h["day_change_value"], h.get("day_change_pct"), "KES"))
@@ -370,10 +422,21 @@ def _moves_card(rg, nw, ps, ips):
                    icon="activity", term="day-change")
 
 
-def coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today):
+def coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today, fs=None):
     """[(date, what, amount text, colour class)] — dated payments and company
     events for things you own, soonest first (also shown on the Overview)."""
     events = []
+    for h in (fs or {}).get("funds", []):
+        if not h.get("data_available"):
+            continue
+        if h.get("next_topup"):
+            events.append((h["next_topup"], f"{h['name']} top-up", f"${h['monthly_amount']:,.0f}", "funds"))
+        ex = (h.get("facts") or {}).get("next_ex_date") or h.get("next_payout_est")
+        if ex and h.get("payouts") in ("reinvest", "cash") and h.get("last_payout"):
+            word = "payout, reinvested" if h["payouts"] == "reinvest" else "payout to you"
+            est = "" if (h.get("facts") or {}).get("next_ex_date") else " (≈ date)"
+            events.append((ex, f"{h['name']} {word}{est}",
+                           f"≈ ${h['last_payout']['amount'] * (h.get('units') or 0):,.2f}", "funds"))
     for r in (bp or {}).get("upcoming_12m") or []:
         what = " + ".join(x for x in (("coupon" if r.get("coupon") else ""),
                                       ("principal" if r.get("principal") else "")) if x)
@@ -400,9 +463,9 @@ def coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today):
     return events
 
 
-def _coming_up_card(bp, ps, ips, fundamentals, intl_fundamentals, today):
+def _coming_up_card(bp, ps, ips, fundamentals, intl_fundamentals, today, fs=None):
     """Dated payments and company events for things you own, soonest first."""
-    events = coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today)
+    events = coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today, fs)
     if not events:
         body = Markup('<p class="muted small">No dated payments or company events in the next few months.</p>')
     else:
@@ -412,15 +475,22 @@ def _coming_up_card(bp, ps, ips, fundamentals, intl_fundamentals, today):
         more = (f'<p class="footnote">+ {len(events) - 6} more — see the Bonds tab and each stock\'s page.</p>'
                 if len(events) > 6 else "")
         body = Markup(f'<ul class="insight-list dated">{items}</ul>{more}')
-    return ui.card(body, title="Coming up", sub="Coupons, dividend dates and results for things you own.",
+    return ui.card(body, title="Coming up",
+                   sub=("Coupons, dividend dates, fund top-ups and payouts, and results for things you own." if fs
+                        else "Coupons, dividend dates and results for things you own."),
                    icon="calendar", term="dividend-dates")
 
 
-def _worth_knowing_card(nw, ps, ips):
+def _worth_knowing_card(nw, ps, ips, fs=None):
     """Four plain facts about how your money is spread."""
     facts = []
     total = nw["total"]
     holdings = []
+    if nw["fx_rate"]:
+        for h in (fs or {}).get("funds", []):
+            if h.get("data_available") and h.get("market_value"):
+                holdings.append((h["name"], h["market_value"] * nw["fx_rate"],
+                                 "Funds: " + ((h.get("facts") or {}).get("category") or "mixed"), None))
     for h in (ps or {}).get("holdings", []):
         if h.get("data_available") and h.get("market_value"):
             holdings.append((h["symbol"], h["market_value"], h.get("sector") or "Other", h.get("tv_signal_class")))
@@ -439,7 +509,8 @@ def _worth_knowing_card(nw, ps, ips):
         facts.append(("Largest sector", f"{sector} — {sv / total * 100:.0f}% of your net worth"))
     negative = sorted(sym for sym, _v, _s, c in holdings if c in ("bearish", "sell", "strong_sell"))
     facts.append(("Mostly negative signals", ", ".join(negative) if negative else "none of your holdings"))
-    missing = sorted(((ps or {}).get("missing_symbols") or []) + ((ips or {}).get("missing_symbols") or []))
+    missing = sorted(((ps or {}).get("missing_symbols") or []) + ((ips or {}).get("missing_symbols") or [])
+                     + ((fs or {}).get("missing") or []))
     facts.append(("No data today", ", ".join(missing) if missing else "every holding was priced"))
     items = "".join(f'<li><span>{escape(k)}</span><b>{escape(v)}</b></li>' for k, v in facts)
     return ui.card(Markup(f'<ul class="insight-list facts">{items}</ul>'), title="Worth knowing",
@@ -447,7 +518,7 @@ def _worth_knowing_card(nw, ps, ips):
                    term="weight")
 
 
-def _everything_table(rg, nw, ps, bp, ips, nse_history, intl_history, fundamentals=None):
+def _everything_table(rg, nw, ps, bp, ips, nse_history, intl_history, fundamentals=None, fs=None):
     """One table: every holding of every kind, valued in KES."""
     total = nw["total"] or 0.0
     rate = nw["fx_rate"]
@@ -512,6 +583,33 @@ def _everything_table(rg, nw, ps, bp, ips, nse_history, intl_history, fundamenta
                     tone=tone(h.get("day_change_pct") if ok else None)),
             ui.cell(_spark(intl_history, h["symbol"], sc.Fmt("$", 2))),
         ])
+    for h in sorted((fs or {}).get("funds", []), key=lambda x: x.get("market_value") or -1, reverse=True):
+        ok = h.get("data_available")
+        v_usd = h.get("market_value") if ok else None
+        v = v_usd * rate if (v_usd is not None and rate) else None
+        link = ui.href(h.get("report_file") or "")
+        name = Markup(f'<span>{escape(h["name"])}<small>{escape((h.get("facts") or {}).get("category") or "Fund")}'
+                      '</small></span>')
+        navs = h.get("navs") or []
+        year = [nv for d, nv in navs if navs and d > navs[-1][0] - dt.timedelta(days=182)][::-3][::-1]
+        rows.append([
+            ui.cell(ui.pill("Fund", "up"), sort="4"),
+            ui.cell(Markup(f'<a class="sym" href="{link}">{name}</a>') if link else Markup(f'<span class="sym">{name}</span>'),
+                    sort=h["name"]),
+            ui.cell((f"{v:,.0f}" if v is not None else (f"${v_usd:,.0f} (no FX rate)" if v_usd is not None
+                                                         else "no data today")), sort=v, cls="private"),
+            ui.cell(Markup(f'{ui.weight_bar(v / total * 100, tone="funds")} <span class="num">{v / total * 100:.1f}%</span>')
+                    if v and total else "—", sort=round(v / total * 100, 2) if v and total else None),
+            ui.cell(money(h["gain"] * rate, sign=True) if (ok and rate and h.get("gain") is not None)
+                    else (money(h.get("gain"), "USD", sign=True) if ok else "—"),
+                    sort=h.get("gain") if ok else None, tone=tone(h.get("gain") if ok else None), cls="private"),
+            ui.cell(pct(h.get("gain_pct")) if ok else "—", sort=h.get("gain_pct") if ok else None,
+                    tone=tone(h.get("gain_pct") if ok else None)),
+            ui.cell(pct(h.get("nav_change_pct"), 2) if ok else "—", sort=h.get("nav_change_pct") if ok else None,
+                    tone=tone(h.get("nav_change_pct") if ok else None)),
+            ui.cell(sc.sparkline(year, label=f"{h['name']}, last 6 months", fmt=sc.Fmt("$", 2), area=False)
+                    if len(year) > 1 else Markup('<span class="spark spark-empty">—</span>')),
+        ])
     cols = [ui.Col("Kind", sort="text"), ui.Col("Holding", sort="text"), ui.Col("Value (KES)", sort="number"),
             ui.Col("Share of net worth", sort="number", term="weight"), ui.Col("Gain (KES)", sort="number"),
             ui.Col("Gain %", sort="number"), ui.Col("Today", sort="number", term="day-change"),
@@ -519,7 +617,8 @@ def _everything_table(rg, nw, ps, bp, ips, nse_history, intl_history, fundamenta
     return ui.section(ui.table(cols, rows, table_id="t-everything", filter_placeholder="Filter your holdings…",
                                show_first=12, empty="Nothing to show yet"),
                       title="Everything you own", sec_id="everything", icon="briefcase",
-                      sub="Kenyan stocks, bonds and international shares in one place, valued in shillings. "
+                      sub=("Kenyan stocks, bonds, international shares and funds" if fs else
+                           "Kenyan stocks, bonds and international shares") + " in one place, valued in shillings. "
                           "Click a column header to sort; click a holding for its full page.")
 
 
@@ -1168,7 +1267,7 @@ def _news_list(items):
     return Markup(f'<ul class="news-list">{"".join(out)}</ul>')
 
 
-def _news_tab(ps, ips, news, intl_news):
+def _news_tab(ps, ips, news, intl_news, fs=None):
     parts = []
     if ps:
         if news:
@@ -1197,6 +1296,17 @@ def _news_tab(ps, ips, news, intl_news):
             parts.append(ui.section(Markup('<p class="muted">No recent headlines found for these companies. Try again '
                                            'next run.</p>'), title="News on Your International Holdings",
                                     sec_id="intl-news", icon="globe"))
+    fund_news = [dict(n, symbol=h["name"]) for h in (fs or {}).get("funds", []) for n in (h.get("news") or [])]
+    if fs:
+        if fund_news:
+            parts.append(ui.section(Markup(
+                '<p class="section-sub">Recent headlines naming your funds or their managers. <strong>Shown neutral, '
+                'on purpose</strong> — read the headline and judge for yourself; each fund\'s page has its own '
+                'list.</p>') + _news_list(fund_news[:24]), title=f"News on Your Funds ({len(fund_news)} recent)",
+                sec_id="funds-news", icon="layers"))
+        else:
+            parts.append(ui.section(Markup('<p class="muted">No recent headlines naming your funds. Try again next '
+                                           'run.</p>'), title="News on Your Funds", sec_id="funds-news", icon="layers"))
     if not parts:
         parts.append(ui.empty_state("No news yet", "Headlines about the companies you hold appear here once you've "
                                     "added holdings.", icon="news"))
@@ -1204,13 +1314,28 @@ def _news_tab(ps, ips, news, intl_news):
 
 
 # ------------------------------------------------------------------ the page
+def _safe_funds_tab(page_funds, rg, fs, today):
+    """The Funds tab — or, if it can't be built this run, a note saying so:
+    a problem there must never stop the rest of the dashboard being written."""
+    try:
+        return page_funds.funds_tab(rg, fs, today=today)
+    except Exception as e:                       # noqa: BLE001 — logged, shown, never fatal
+        import logging
+        logging.getLogger(__name__).error(f"Funds tab skipped: {type(e).__name__}: {e}")
+        return ui.banner(f"⚠️ The Funds tab couldn't be built this run ({type(e).__name__}) — everything else is "
+                         "unaffected. The log has the details.", tone="danger")
+
+
 def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_summary=None, usd_kes=None,
           portfolio_history=None, portfolio_news=None, portfolio_history_tracker=None,
           intl_portfolio_history=None, intl_portfolio_news=None, intl_portfolio_history_tracker=None,
-          fundamentals=None, intl_fundamentals=None, nse_history=None, intl_history=None, today=None):
+          fundamentals=None, intl_fundamentals=None, nse_history=None, intl_history=None, today=None,
+          funds_summary=None):
     """The whole My Portfolio page body (Markup)."""
+    import page_funds
     today = today or dt.date.today()
-    nw = networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary, usd_kes)
+    nw = networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary, usd_kes, funds_summary)
+    fs = funds_summary
     ps, bp, ips = portfolio_summary, bond_portfolio, intl_portfolio_summary
     n_news = len(portfolio_news or []) + len(intl_portfolio_news or [])
     head = Markup(
@@ -1229,7 +1354,7 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
         ("summary", "Summary", _summary_tab(rg, nw, portfolio_summary=ps, bond_portfolio=bp,
                                             intl_portfolio_summary=ips, fundamentals=fundamentals,
                                             intl_fundamentals=intl_fundamentals, nse_history=nse_history,
-                                            intl_history=intl_history, today=today), None),
+                                            intl_history=intl_history, today=today, funds_summary=fs), None),
         ("kenyan", "Kenyan stocks", _kenyan_tab(rg, ps, history_rows=portfolio_history,
                                                 tracker=portfolio_history_tracker, nse_history=nse_history),
          len(ps["holdings"]) if ps else None),
@@ -1238,6 +1363,8 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
                                                      tracker=intl_portfolio_history_tracker,
                                                      intl_history=intl_history),
          len(ips["holdings"]) if ips else None),
-        ("news", "News", _news_tab(ps, ips, portfolio_news or [], intl_portfolio_news or []), n_news or None),
+        ("funds", "Funds", _safe_funds_tab(page_funds, rg, fs, today), len(fs["funds"]) if fs else None),
+        ("news", "News", _news_tab(ps, ips, portfolio_news or [], intl_portfolio_news or [], fs),
+         (n_news + sum(len(h.get("news") or []) for h in (fs or {}).get("funds", []))) or None),
     ], label="Portfolio sections")
     return head + tabs

@@ -86,8 +86,10 @@ re-run — or let a helper script add the row for you
 | `international_holdings.csv` | **No — private** | US-listed stock purchases | **USD** |
 | `bonds.csv` | **No — private** | Kenya Treasury / Infrastructure bond purchases | KES |
 | `watchlist.csv` | **No — private** | ⭐ Stocks you're watching (NSE or international) and your buy/sell prices | the stock's own currency |
+| `funds.csv` | **No — private** | 🏦 Mutual funds you hold, from your bank statement, and how each is run (payouts, monthly top-up, sales charge) | **USD** |
+| `fund_transactions.csv` | **No — private** | Everything after each fund's statement: top-ups and payouts (added by the dashboard, once each), purchases and sales | **USD** |
 | `backups/` | **No — private** | Copies the dashboard app takes before it removes or edits a row | — |
-| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv` | Yes | Fake-data templates to copy from | — |
+| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv`, `funds.example.csv`, `fund_transactions.example.csv` | Yes | Fake-data templates to copy from | — |
 
 Each is a separate file because each asset class has its own currency and its
 own meaning for "price" — so a US stock priced in dollars can never be mixed
@@ -165,6 +167,51 @@ AAPL,INTL,180,260,buy on a dip,,
 A ticker listed twice uses its first row (with a warning). A row with a ticker
 that has no data — a typo, say — still shows a card saying so, so you can
 spot and fix it.
+
+### Mutual funds — `funds.csv` and `fund_transactions.csv` (USD)
+
+**`funds.csv` — one row per fund, copied from your bank statement:**
+
+| Column | Required? | What to put |
+|---|---|---|
+| `isin` | **Yes** | The fund's 12-character ISIN, from the statement or the fund's factsheet. The check digit is verified, so a typo is caught. It's how the dashboard finds the fund's prices. |
+| `name` | **Yes** | Any name you like, as it should appear on the dashboard. |
+| `units` | **Yes** | "Current units" on the statement. |
+| `avg_cost` | **Yes** | "Average unit cost" on the statement (what you paid per unit, sales charges included). |
+| `as_of` | **Yes** | The NAV date on the statement — the day those units are true for. Only what happens **after** it is added from `fund_transactions.csv`. |
+| `statement_nav` | No (recommended) | The statement's price per unit ("NAV/Bid"). The dashboard checks it against its price source for that date, so you know it's pricing exactly your share class. |
+| `currency` | No | `USD` (the default). Only USD funds are added to your totals. |
+| `payouts` | No | `reinvest` (payouts buy more units), `cash` (paid into your account) or `none` (an accumulating fund). |
+| `monthly_amount`, `monthly_day` | No | A standing monthly top-up: the amount and the day of the month (e.g. `50` and `15`). A day the month doesn't have means its last day. |
+| `fee_pct` | No | The sales charge your bank takes from each purchase, in % (e.g. `2`). |
+| `peers` | No | Competitor funds to compare with — their ISINs, separated by `;`. Use accumulating share classes, so payouts count for everyone. |
+| `factsheet_url` | No | The fund's page on its manager's website. For managers whose data the dashboard can read directly this switches on the manager's own prices and payout history (otherwise prices come from the Financial Times' fund data). |
+| `note` | No | Anything you like. |
+
+**`fund_transactions.csv` — what happened after the statement date:**
+
+| Column | What it holds |
+|---|---|
+| `date`, `isin` | When, and which fund. |
+| `type` | `topup` (automatic monthly), `buy`, `sell`, `reinvest` (a payout that bought units), `payout` (a payout paid to you). |
+| `amount` | Cash: what you paid (top-up / buy), received (payout / sell), or the payout that was reinvested. |
+| `units` | Units added (or sold). Leave blank on a `buy` and the dashboard works them out from that day's price after the sales charge. |
+| `price`, `fee_pct` | The price per unit used and the sales charge, when the dashboard worked out the units. |
+| `status` | `pending` (waiting for the day's price), `estimated` (worked out by the dashboard), `confirmed` (from your statement — never changed by the dashboard). |
+| `ref` | The automatic rows' unique key (`topup:2026-04`, `payout:2026-04-30`) — it's what makes each one appear exactly once. |
+
+You don't add top-ups or payouts yourself: on each run the dashboard adds any
+that are due since the statement — exactly once each, catching up if the
+computer was off on the day. When your statement arrives, copy its units into
+the row and set `status` to `confirmed` (or run
+`./venv/bin/python3 fund.py confirm ISIN REF UNITS`). A payout whose amount the
+fund manager hasn't published yet uses the last published amount, marked
+"provisional" in the note, and is corrected automatically once it is.
+
+```csv
+isin,name,units,avg_cost,as_of,statement_nav,payouts,monthly_amount,monthly_day,fee_pct
+XS9000000018,Sample Global Bond Income Fund A (USD) Dist,400,9.80,2026-03-31,9.9120,reinvest,50,15,2
+```
 
 ## What the reader accepts (and what it deliberately refuses)
 

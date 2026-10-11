@@ -182,6 +182,8 @@ def render(inputs_dir, code_dir, out_dir):
     from analysis_engine import AnalysisEngine
     report_generator.datetime = FrozenDateTime
     watchlist_report.dt = clock
+    import portfolio as portfolio_mod          # the snapshot look-backs (1 day / 1 week …) read the clock too
+    portfolio_mod.dt = clock
 
     for fid in FETCHERS:
         mod_name, fn = fid.split(".")

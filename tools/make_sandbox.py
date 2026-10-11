@@ -4,14 +4,16 @@ Create a throw-away sandbox with a made-up portfolio, for testing the
 dashboard without touching your real files.
 
 Everything in it is placeholder data — tickers nobody needs to own, made-up
-bonds (tools/fake_bonds.py) and round example amounts — so pages built from it
-are safe to screenshot or share. Point the pipeline at it with environment
-variables (BOND_REFERENCE_EXTRA makes the made-up bonds known):
+bonds (tools/fake_bonds.py), made-up mutual funds (tools/fake_funds.py) and round
+example amounts — so pages built from it are safe to screenshot or share. Point
+the pipeline at it with environment variables (BOND_REFERENCE_EXTRA makes the
+made-up bonds known; FUND_DATA_FILE supplies the made-up funds' prices):
 
   python tools/make_sandbox.py /tmp/nse-sandbox
   PORTFOLIO_DIR=/tmp/nse-sandbox/portfolio REPORT_DIRECTORY=/tmp/nse-sandbox/reports \\
   CACHE_DIR=/tmp/nse-sandbox/data LOG_FILE=/tmp/nse-sandbox/logs/analyzer.log \\
   BOND_REFERENCE_EXTRA=/tmp/nse-sandbox/bond_reference.json \\
+  FUND_DATA_FILE=/tmp/nse-sandbox/fund_market.json \\
       ./venv/bin/python3 main.py --no-email --detailed
 
 The holdings deliberately cover the awkward cases too: two purchases of one
@@ -26,6 +28,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fake_bonds                      # noqa: E402
+import fake_funds                      # noqa: E402
 
 HOLDINGS = """symbol,quantity,buy_price,buy_date,note
 EQTY,200,45.10,2025-11-03,
@@ -93,9 +96,13 @@ def main(target):
     for name, rows in hist.items():
         with open(os.path.join(portfolio, name), "w", encoding="utf-8") as f:
             json.dump(rows, f, indent=1)
+    with open(os.path.join(portfolio, "funds.csv"), "w", encoding="utf-8") as f:
+        f.write(fake_funds.funds_csv())
     ref = fake_bonds.write_reference(os.path.join(target, "bond_reference.json"))
+    funds = fake_funds.write_market(os.path.join(target, "fund_market.json"))
     print(f"Sandbox ready: {os.path.abspath(target)}")
-    print(f"Set BOND_REFERENCE_EXTRA={os.path.abspath(ref)} when running the pipeline on it.")
+    print(f"Set BOND_REFERENCE_EXTRA={os.path.abspath(ref)} and FUND_DATA_FILE={os.path.abspath(funds)} "
+          "when running the pipeline on it.")
 
 
 if __name__ == "__main__":

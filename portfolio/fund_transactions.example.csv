@@ -1,0 +1,4 @@
+date,isin,type,amount,units,price,fee_pct,status,ref,note
+2026-04-15,XS9000000018,topup,50,4.947,9.9050,2,estimated,topup:2026-04,automatic top-up — check the units on your statement
+2026-04-30,XS9000000018,reinvest,18.12,1.829,9.9070,,estimated,payout:2026-04-30,"0.0453 per unit × 400.0 units, reinvested"
+2026-05-04,XS9000000026,buy,1000,6.420,,,confirmed,,"a one-off purchase, units from the statement"
