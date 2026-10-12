@@ -8,6 +8,7 @@ sectors — and every stock with its signal, price (and price check), change,
 30-day trend and score. The heatmaps and charts live on Market map.
 """
 
+import datetime as dt
 import html as html_mod
 
 from markupsafe import Markup, escape
@@ -51,7 +52,7 @@ def _for_you(nw, events, watch_count):
 
 
 # ------------------------------------------------------------------ the market
-def _pulse(total, bullish, bearish, neutral, breadth):
+def _pulse(total, bullish, bearish, neutral, breadth, infl=None):
     kpis = [ui.kpi("Stocks", str(total), sub="traded on the NSE today"),
             ui.kpi("Bullish", str(bullish), tone="up", term="tv-rating", sub="TradingView buy ratings"),
             ui.kpi("Bearish", str(bearish), tone="down", term="tv-rating", sub="sell ratings"),
@@ -61,6 +62,11 @@ def _pulse(total, bullish, bearish, neutral, breadth):
                                   ("pct_rsi_above_50", "RSI > 50", "rsi", "more buying than selling pressure")):
         if breadth and key in breadth:
             kpis.append(ui.kpi(label, f"{breadth[key]}%", term=term, sub=sub))
+    if infl and infl.get("yoy") is not None:
+        when = dt.date.fromisoformat(infl["month"])
+        kpis.append(ui.kpi("Inflation", f"{infl['yoy']:.2f}%", term="inflation", href_to="pulse.html#inflation",
+                           tone=None if infl.get("in_band") else "down",
+                           sub=f"Kenya, {when:%b %Y} · what your money has to beat"))
     return ui.kpi_row(kpis, cls="kpis-pulse")
 
 
@@ -170,7 +176,7 @@ def _all_stocks(rg, stocks, nse_results):
 
 
 def build(rg, *, stocks, gainers, losers, sectors, breadth, bullish, bearish, neutral, total,
-          nse_results=None, networth=None, events=None, watch_count=None):
+          nse_results=None, networth=None, events=None, watch_count=None, inflation_latest=None):
     """The whole Overview page body (Markup)."""
     by_symbol = {s["symbol"]: s for s in stocks}
     # The movers lists carry only symbol and change; add each company's name and page.
@@ -182,7 +188,7 @@ def build(rg, *, stocks, gainers, losers, sectors, breadth, bullish, bearish, ne
                'charts, see the <a href="visuals.html">🗺️ Visuals</a> tab.</p>'),
         _for_you(networth, events or [], watch_count),
         ui.section(_join([
-            _pulse(total, bullish, bearish, neutral, breadth),
+            _pulse(total, bullish, bearish, neutral, breadth, inflation_latest),
             Markup('<p class="dq-note">📊 Looking for the heatmap and charts? They moved to the '
                    '<a href="visuals.html">🗺️ Visuals</a> tab to keep this page uncluttered.</p>'),
             Markup('<div class="grid-2 market-row">' + str(_breadth(stocks)) + str(_sectors(sectors)) + '</div>'),

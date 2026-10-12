@@ -9,7 +9,7 @@ the code render from that recording:
 
   record   run main.py once and save every page builder's inputs, plus what
            the builders fetch themselves (logos, Treasury rates, foreign
-           flows, market pulse), to <dir>/inputs.pkl
+           flows, market pulse, inflation), to <dir>/inputs.pkl
   render   rebuild every page from the recording with one version of the
            code — clock frozen to the recording, network blocked
   compare  compare what two rendered folders tell the reader: numbers,
@@ -52,7 +52,8 @@ ENTRY_POINTS = ("generate_stock_report", "generate_international_stock_report",
                 "generate_market_summary", "generate_index")
 # Fetches the page builders make on their own while rendering.
 FETCHERS = ("foreign_flows.load", "market_pulse.load_all",
-            "treasury_securities.load_treasury", "company_logos.fetch_logo_base64")
+            "treasury_securities.load_treasury", "company_logos.fetch_logo_base64",
+            "inflation_data.fetch_all")
 
 
 def _fetch_key(fetcher, args, kwargs):
@@ -192,7 +193,10 @@ def render(inputs_dir, code_dir, out_dir):
         def replay(*a, _fid=fid, _res=results, **k):
             blob = _res.get(_fetch_key(_fid, a, k), _res.get("*"))
             return pickle.loads(blob) if blob is not None else None
-        setattr(importlib.import_module(mod_name), fn, replay)
+        try:
+            setattr(importlib.import_module(mod_name), fn, replay)
+        except ImportError:                       # older code without this source: nothing to replay
+            continue
 
     counter = _WarningCounter()
     logging.getLogger().addHandler(counter)

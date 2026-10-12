@@ -72,6 +72,10 @@ FUND_FIELDS = (
     # The fund's page on its manager's website — lets the dashboard read the
     # manager's own prices and payouts, where the dashboard can read them.
     _F("factsheet_url", ("official_url", "fund_url", "url"), "text", False),
+    # When you first put money in (approximate is fine) — for "after
+    # inflation". With a monthly top-up, the statement's cost is taken as
+    # paid in evenly month by month from this date; without, all on it.
+    _F("invested_since", ("first_invested", "start_date", "since"), "date", False),
     pcsv._NOTE,
 )
 
@@ -220,8 +224,11 @@ def load_funds(portfolio_dir):
             "fee_pct": float(fee or 0.0), "peers": [p for p in peers if valid_isin(p) and p != isin],
             "factsheet_url": (r.get("factsheet_url") or "").strip()
             if (r.get("factsheet_url") or "").strip().lower().startswith("https://") else None,
+            "invested_since": r.get("invested_since") if (r.get("invested_since") or "9999") <= r["as_of"] else None,
             "note": r.get("note") or "",
         })
+        if r.get("invested_since") and r["invested_since"] > r["as_of"]:
+            logger.warning(f"{FUNDS_FILE} line {line}: invested_since is after the statement date — ignored")
     return funds
 
 
@@ -655,7 +662,7 @@ def compute_fund_portfolio(funds, txns, market, usd_kes=None, today=None):
             warnings.append(f"{f['name']}: {len(early)} transaction(s) dated on or before the statement date "
                             f"{f['as_of']} were ignored — your statement's units already include them")
         h = {k: f.get(k) for k in ("isin", "name", "currency", "payouts", "monthly_amount", "monthly_day", "fee_pct",
-                                   "as_of", "statement_nav", "peers", "factsheet_url", "note")}
+                                   "as_of", "statement_nav", "peers", "factsheet_url", "invested_since", "note")}
         h.update(statement_units=f["units"], statement_avg_cost=f["avg_cost"], transactions=ft,
                  source=m.get("source"), source_url=m.get("source_url"), facts=m.get("facts") or {},
                  cross_check=m.get("cross_check"), distributions=dists, navs=navs, news=m.get("news") or [])

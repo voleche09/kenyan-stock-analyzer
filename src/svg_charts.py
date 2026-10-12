@@ -196,6 +196,17 @@ def date_ticks(dates, weekly=False):
     """(index, label) ticks: the first trading day of each month — or of
     each week for short ranges — with the year shown at January."""
     ds = [_as_date(d) for d in dates]
+    known = [d for d in ds if d]
+    if not weekly and len(known) > 1 and (known[-1] - known[0]).days > 3 * 365:
+        # years of data: one tick per year, labelled with the year
+        ticks, prev = [], None
+        for i, d in enumerate(ds):
+            if d is None:
+                continue
+            if prev is not None and d.year != prev:
+                ticks.append((i, str(d.year)))
+            prev = d.year
+        return ticks[::math.ceil(len(ticks) / 8)] if len(ticks) > 8 else ticks
     ticks, prev = [], None
     for i, d in enumerate(ds):
         if d is None:
@@ -219,7 +230,12 @@ def x_ticks(x, weekly=False):
         return date_ticks(x, weekly=weekly)
     n = len(x)
     step = max(1, math.ceil(n / 7))
-    return [(i, str(v)) for i, v in enumerate(x) if i % step == 0 or i == n - 1]
+    ticks = [(i, str(v)) for i, v in enumerate(x) if i % step == 0]
+    if n and ticks[-1][0] != n - 1:
+        if n - 1 - ticks[-1][0] < step / 2 and len(ticks) > 1:
+            ticks.pop()                        # too close to the last label: they'd overlap
+        ticks.append((n - 1, str(x[-1])))
+    return ticks
 
 
 def _x_payload(x):

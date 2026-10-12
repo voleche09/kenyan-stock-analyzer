@@ -1176,6 +1176,16 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             logger.warning(f"Market Pulse: loader failed: {e}")
             return {"news": [], "cbk": {}, "oil": [], "african_indices": [], "fx": [], "generated_at": ""}
 
+    def _load_inflation(self):
+        """Kenya's inflation and the rates around it (inflation_data.py) —
+        cached for the day; an empty dict if every source is down."""
+        try:
+            import inflation_data
+            return inflation_data.fetch_all(self.cache_dir or "data")
+        except Exception as e:
+            logger.warning(f"Inflation data skipped: {e}")
+            return {}
+
     def _load_treasury(self):
         try:
             from treasury_securities import load_treasury
@@ -1552,10 +1562,12 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
         events = page_portfolio.coming_up_events(bond_portfolio, portfolio_summary, intl_portfolio_summary,
                                                  fundamentals_data, intl_fundamentals, _dt.date.today(),
                                                  funds_summary)
+        macro = self._load_inflation()
         overview_body = page_overview.build(
             self, stocks=stocks, gainers=gainers, losers=losers, sectors=sectors, breadth=breadth,
             bullish=bullish, bearish=bearish, neutral=neutral, total=total, nse_results=nse_results,
-            networth=networth, events=events, watch_count=watchlist_count)
+            networth=networth, events=events, watch_count=watchlist_count,
+            inflation_latest=(macro or {}).get("latest"))
 
         # ---- The market pages (see page_market.py) ----
         # Next earnings counts days in Nairobi time; the dividend calendar in local time.
@@ -1573,9 +1585,22 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
         quality_body = page_market.quality(self, stocks, alerts)
 
         foreign_body = page_market.foreign(self, self._load_foreign_flows())
+        treasury = self._load_treasury()
+        tbill_91 = next((t.get("rate") for t in treasury.get("tbills") or [] if t.get("tenor_days") == 91), None)
         pulse_body = page_market.pulse(self, self._load_market_pulse(
-            {s['symbol']: {'daily_change_pct': s.get('change')} for s in stocks}))
-        bonds_body = page_market.bonds(self, self._load_treasury())
+            {s['symbol']: {'daily_change_pct': s.get('change')} for s in stocks}),
+            inflation_data=macro, tbill_pct=tbill_91)
+        bonds_body = page_market.bonds(self, treasury)
+
+        # ---- after inflation: your holdings vs Kenya's consumer prices
+        import inflation
+        try:
+            real = inflation.portfolio_real(portfolio_summary, bond_portfolio, intl_portfolio_summary, funds_summary,
+                                            macro, usd_kes)
+            race = inflation.race(bond_portfolio, funds_summary, macro, tbill_91)
+        except Exception as e:                       # never stops the dashboard
+            logger.error(f"After-inflation figures skipped: {type(e).__name__}: {e}")
+            real = race = None
 
         # ---- MY PORTFOLIO page (private) — tabs: Summary · Kenyan stocks ·
         # Bonds · International · News (see page_portfolio.py). The "➕ Record
@@ -1602,7 +1627,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             intl_portfolio_history_tracker=intl_portfolio_history_tracker,
             fundamentals=fundamentals_data, intl_fundamentals=intl_fundamentals,
             nse_history=last_closes(nse_results, portfolio_summary),
-            intl_history=last_closes(intl_results, intl_portfolio_summary), funds_summary=funds_summary)
+            intl_history=last_closes(intl_results, intl_portfolio_summary), funds_summary=funds_summary,
+            inflation={"macro": macro, "real": real, "race": race})
 
         # ---- Assemble & write all pages (each shows its sidebar label as its title) ----
         pages = {

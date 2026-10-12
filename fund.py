@@ -17,6 +17,9 @@ git; you can also edit both in a spreadsheet — see portfolio/README.md).
   Your statement arrived — copy its units into an automatic top-up / payout:
     python3 fund.py confirm ISIN REF UNITS        (REF as listed, e.g. topup:2026-03)
 
+  When you first invested (approximate is fine) — for "after inflation":
+    python3 fund.py since ISIN YYYY-MM-DD
+
   See what's recorded:
     python3 fund.py list
 
@@ -119,6 +122,38 @@ def cmd_confirm(a, folder):
     sys.exit(f"No row {a.ref} for {a.isin} — see the refs with: fund.py list")
 
 
+def cmd_since(a, folder):
+    """Set a fund's invested_since date — adding the column to funds.csv if
+    it doesn't have one yet (a safety copy goes to portfolio/backups/ first)."""
+    import csv
+    path = os.path.join(folder, fp.FUNDS_FILE)
+    fund = next((f for f in fp.load_funds(folder) if f["isin"] == a.isin), None)
+    if not fund:
+        sys.exit(f"{a.isin} isn't in funds.csv")
+    if a.date > fund["as_of"]:
+        sys.exit(f"{a.date} is after the statement date {fund['as_of']} — the first investment comes before it")
+    for line, r in pcsv.read_rows(path, fp.FUND_FIELDS):
+        if (r["isin"] or "").strip().upper() == a.isin:
+            _new, dropped = pcsv.update_row(path, fp.FUND_FIELDS, line, expect={"isin": r["isin"]},
+                                            changes={"invested_since": a.date})
+            if not dropped:
+                print(f"✓ {fund['name']}: invested since {a.date}")
+                return
+            break
+    # no invested_since column yet: add it, keeping every other cell as it was
+    pcsv.backup_file(path)
+    with open(path, encoding="utf-8-sig", newline="") as fh:
+        rows = list(csv.reader(fh))
+    rows[0].append("invested_since")
+    for row in rows[1:]:
+        row.append(a.date if row and row[0].strip().upper() == a.isin else "")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="") as fh:
+        csv.writer(fh, lineterminator="\n").writerows(rows)
+    os.replace(tmp, path)
+    print(f"✓ {fund['name']}: invested since {a.date} (added an invested_since column to funds.csv)")
+
+
 def cmd_list(folder):
     funds = fp.load_funds(folder)
     if not funds:
@@ -167,6 +202,9 @@ def main():
     s.add_argument("isin", type=_isin)
     s.add_argument("ref")
     s.add_argument("units", type=_positive)
+    s = sub.add_parser("since", help="when you first invested in a fund (for 'after inflation')")
+    s.add_argument("isin", type=_isin)
+    s.add_argument("date", type=_date)
     sub.add_parser("list", help="show what's recorded")
     a = p.parse_args()
     folder = Config().portfolio_dir
@@ -177,6 +215,8 @@ def main():
         cmd_buy(a, folder, sell=a.cmd == "sell")
     elif a.cmd == "confirm":
         cmd_confirm(a, folder)
+    elif a.cmd == "since":
+        cmd_since(a, folder)
     else:
         cmd_list(folder)
 

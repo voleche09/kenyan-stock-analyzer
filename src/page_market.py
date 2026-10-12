@@ -930,9 +930,205 @@ def _pct_text(v):
     return f"{v:+.2f}%" if v is not None else "—"
 
 
-def pulse(rg, p):
+_INFLATION_EXPLAIN = [
+    ("Inflation", "How much more the same basket of everyday things (food, rent, fuel, school fees…) costs than a "
+     "year earlier, measured by the Kenya National Bureau of Statistics every month.",
+     "6% inflation: what cost KES 1,000 last year costs about KES 1,060 now."),
+    ("Why it matters for your money", "Money that grows slower than inflation buys less each year, even if the "
+     "number in your account goes up. The growth that's left after inflation is your real return.",
+     "Your investments made 10% in a year when inflation was 6%: you're about 3.8% richer in what you can buy."),
+    ("The Central Bank's target", "The Central Bank of Kenya aims to keep inflation at 5%, anywhere from 2.5% to "
+     "7.5% being acceptable. Above the band it usually raises the Central Bank Rate; below, it can cut.",
+     "Inflation at 8.2% (above the band) makes a rate rise more likely — T-bill and bond rates tend to follow."),
+    ("Real interest rate", "A Treasury bill's rate minus inflation — what lending to the government really earns.",
+     "A 91-day bill at 9% with inflation at 6% earns about 3% real (before tax)."),
+    ("Core and non-core", "Non-core is food and energy, which jump around with harvests and fuel prices; core is "
+     "everything else and shows the underlying trend the Central Bank watches.",
+     "Fuel up 15% lifts non-core inflation sharply while core stays near 4%."),
+]
+
+
+def _rise_tone(v, ref):
+    """Rising prices read red: faster than overall inflation = down, slower = up."""
+    if v is None:
+        return None
+    return "down" if v > ref + 0.25 else ("up" if v < ref - 0.25 else None)
+
+
+def _savings_card(m, month):
+    """What inflation did to KES 100,000 kept as cash over 1, 3, 5 and 10 years."""
+    import inflation
+    cpi = inflation.CPI(m.get("cpi") or [])
+    tiles = []
+    for yrs in (1, 3, 5, 10):
+        need = inflation.needed_today(cpi, yrs, month)
+        if need:
+            then = dt.date(month.year - yrs, month.month, 1)
+            tiles.append(ui.kpi(f"KES 100,000 from {then:%b %Y}", f"KES {need:,.0f}", tone="down",
+                                sub=f"needed now to buy the same things (+{need / 1000 - 100:.0f}%)"))
+    if not tiles:
+        return None
+    return ui.card(ui.kpi_row(tiles, cls="kpis-2") + Markup(
+        '<p class="footnote">Cash that earns nothing loses this much buying power. Your investments need to grow '
+        'faster than this to make you richer — see <a href="portfolio.html#after-inflation">My Portfolio → After '
+        'inflation</a>.</p>'), title="What inflation does to savings", icon="coins")
+
+
+def inflation_section(macro, tbill_pct=None):
+    """Kenya's inflation for the Market Pulse page: the rate now, month by
+    month since 2005, year by year, what's driving it, everyday prices and
+    what it does to savings. `macro` comes from inflation_data.fetch_all()."""
+    import inflation
+    m = macro or {}
+    lt = m.get("latest")
+    if not lt:
+        return ui.section(ui.empty_state("Inflation figures unavailable this run",
+                                         "The Central Bank of Kenya's data didn't answer — they'll be back next run.",
+                                         icon="alert"), title="Inflation in Kenya", sec_id="inflation", icon="trend-up")
+    month = dt.date.fromisoformat(lt["month"])
+    mname = month.strftime("%B %Y")
+    prev_name = (month - dt.timedelta(days=1)).strftime("%B")
+    yoy, prev = lt["yoy"], lt.get("prev_yoy")
+    lo, mid, hi = m["target"]
+    band = ("inside the target band" if lt["in_band"] else ("above the target band" if yoy > hi
+                                                             else "below the target band"))
+    tb = tbill_pct if tbill_pct is not None else (m.get("tbill_latest") or (None, None))[1]
+    kpis = [
+        ui.kpi("Inflation, last 12 months", f"{yoy:.2f}%", big=True, term="inflation",
+               sub=f"{mname}: prices {yoy:.1f}% higher than a year earlier"
+                   + (f" · {'up' if yoy > prev else 'down' if yoy < prev else 'unchanged'} "
+                      f"{abs(yoy - prev):.2f} points from {prev_name}" if prev is not None else "")),
+        ui.kpi("Central Bank target", f"{lo:g}–{hi:g}%", tone="up" if lt["in_band"] else "down", term="inflation-target",
+               sub=f"aim {mid:g}% · {mname.split()[0]} is {band}"),
+        ui.kpi("Prices this month", f"{lt['month_pct']:+.2f}%" if lt.get("month_pct") is not None else "—",
+               sub=f"from {prev_name} to {mname.split()[0]}"),
+        ui.kpi("12-month average", f"{lt['annual_avg']:.2f}%" if lt.get("annual_avg") is not None else "—",
+               sub="average inflation over the last 12 months"),
+    ]
+    if tb is not None:
+        kpis.append(ui.kpi("Real T-bill rate", f"{tb - yoy:+.2f} pts", tone="up" if tb > yoy else "down",
+                           term="real-rate", sub=f"91-day T-bill {tb:.2f}% − inflation {yoy:.2f}%"))
+    if m.get("fx_1y_pct") is not None:
+        d, v = m["fx_latest"]
+        kpis.append(ui.kpi("US dollar vs shilling, 1 year", f"{m['fx_1y_pct']:+.1f}%", term="fx-rate",
+                           sub=f"KES {v:.2f} per $ ({d:%b %Y} average) · "
+                               + ("dollar savings gained in shillings" if m["fx_1y_pct"] > 0
+                                  else "dollar savings lost in shillings")))
+    if (m.get("us_latest") or {}).get("yoy") is not None:
+        us = m["us_latest"]
+        kpis.append(ui.kpi("US inflation", f"{us['yoy']:.1f}%",
+                           sub=f"{dt.date.fromisoformat(us['month']):%B %Y} · for money kept in dollars"))
+    parts = [ui.kpi_row(kpis, cls="kpis-summary")]
+
+    # ---- month by month, with the rates that compete with it
+    head = m.get("headline") or []
+    rates = {d: (t, c) for d, t, c in (m.get("rates") or [])}
+    dates = [d for d, _y, _a in head]
+    series = [sc.Series("infl", "Inflation (12 months)", [y for _d, y, _a in head], fmt=sc.Fmt(suffix="%", decimals=2))]
+    if rates:
+        series += [sc.Series("tbill", "91-day T-bill", [(rates.get(d) or (None, None))[0] for d in dates],
+                             fmt=sc.Fmt(suffix="%", decimals=2), toggle=True),
+                   sc.Series("cbr", "Central Bank Rate", [(rates.get(d) or (None, None))[1] for d in dates],
+                             fmt=sc.Fmt(suffix="%", decimals=2), toggle=True)]
+    tf = [(k, n) for k, n in (("1Y", 12), ("3Y", 36), ("5Y", 60), ("10Y", 120)) if n < len(dates)] + [("All", None)]
+    monthly = sc.chart("c-inflation", dates, series, title="Inflation month by month", height=280, timeframes=tf,
+                       ref_lines=[(hi, "band", f"Top of the band {hi:g}%"), (mid, "target", f"Target {mid:g}%"),
+                                  (lo, "band", f"Bottom of the band {lo:g}%")],
+                       show_title=False, note="When the teal line (T-bills) is above the red one (inflation), "
+                                             "lending to the government beats rising prices.")
+    # ---- year by year: the year's average price level vs the year before's
+    yearly = []
+    yi, yc = m.get("yearly_index") or {}, m.get("yearly_cbk") or {}
+    for y in sorted(set(yc) | set(yi)):
+        v = (yi.get(y) or {}).get("avg_pct")
+        v = v if v is not None else yc.get(y)
+        if v is not None:
+            yearly.append((str(y), v))
+    partial = lt.get("annual_avg") is not None and month.month != 12
+    if partial:
+        yearly.append((f"{month.year}*", lt["annual_avg"]))
+    years = sc.chart("c-inflation-yearly", [k for k, _v in yearly],
+                     [sc.Series("infl", "Average inflation that year", [v for _k, v in yearly], kind="bars",
+                                fmt=sc.Fmt(suffix="%", decimals=2))],
+                     title="Inflation year by year", height=240, bars_mode=True, legend=False, show_title=False,
+                     ref_lines=[(hi, "band", f"{hi:g}%"), (lo, "band", f"{lo:g}%")],
+                     note=(f"{month.year}*: the 12 months to {month:%B}." if partial else None)) if yearly else ""
+    parts.append(Markup('<div class="grid-2">'
+                        + str(ui.card(monthly, title="Month by month, since 2005", icon="activity", term="inflation",
+                                      sub="Inflation against the 91-day T-bill rate and the Central Bank Rate "
+                                          "(tap the chips to show or hide them)"))
+                        + str(ui.card(years, title="Year by year", icon="calendar",
+                                      sub="Each year's average prices vs the year before")) + "</div>"))
+
+    # ---- what's driving it
+    k = m.get("knbs") or {}
+    divs = sorted(k.get("divisions") or [], key=lambda x: -x["year_pct"])
+    drivers = []
+    if divs:
+        drivers.append(ui.card(sc.hbars([{"label": d["name"], "value": d["year_pct"],
+                                          "sub": f'{d["weight"]:.1f}% of household spending · {d["month_pct"]:+.1f}% this month',
+                                          "tone": _rise_tone(d["year_pct"], yoy) or "accent"} for d in divs],
+                                        fmt=sc.Fmt(suffix="%", decimals=1, sign=True)),
+                               title="What's getting more expensive", icon="bar",
+                               sub=f"12-month change by spending group, {mname} · red = rising faster than overall "
+                                   "inflation, green = slower"))
+    core = k.get("core") or []
+    if len(core) > 2:
+        cd = [dt.date.fromisoformat(c["month"]) for c in core]
+        drivers.append(ui.card(sc.chart("c-core", cd, [
+            sc.Series("noncore", "Non-core (food & energy)", [c["noncore_pct"] for c in core], fmt=sc.Fmt(suffix="%", decimals=1)),
+            sc.Series("core", "Core (everything else)", [c["core_pct"] for c in core], fmt=sc.Fmt(suffix="%", decimals=1))],
+            title="Core and non-core inflation", height=220, show_title=False),
+            title="Core vs non-core, last 13 months", icon="activity", term="core-inflation"))
+    savings = _savings_card(m, month)
+    right = "".join(str(x) for x in (drivers[1:] if len(drivers) > 1 else []) + ([savings] if savings else []))
+    if drivers:
+        parts.append(Markup(f'<div class="grid-2"><div>{drivers[0]}</div><div class="stack">{right}</div></div>'))
+    elif savings:
+        parts.append(savings)
+    prices = k.get("prices") or []
+    if prices:
+        rows = [[ui.cell(Markup(f"<strong>{escape(p_['name'])}</strong>"), sort=p_["name"]),
+                 ui.cell(f'{p_["qty"]} {p_["unit"]}'),
+                 ui.cell(f'KES {p_["year_ago"]:,.2f}' if p_.get("year_ago") else "—", sort=p_.get("year_ago")),
+                 ui.cell(f'KES {p_["now"]:,.2f}' if p_.get("now") else "—", sort=p_.get("now")),
+                 ui.cell(f'{p_["month_pct"]:+.1f}%', sort=p_["month_pct"], tone=_rise_tone(p_["month_pct"], 0)),
+                 ui.cell(f'{p_["year_pct"]:+.1f}%', sort=p_["year_pct"], tone=_rise_tone(p_["year_pct"], yoy))]
+                for p_ in prices]
+        parts.append(ui.details(f"🛒 Everyday prices, {mname}", ui.table(
+            [ui.Col("Item", sort="text"), ui.Col("Quantity"), ui.Col("A year ago", sort="number"),
+             ui.Col("Now", sort="number"), ui.Col("1 month", sort="number"), ui.Col("12 months", sort="number")],
+            rows, table_id="t-retail-prices") + Markup(
+            '<p class="footnote">National average retail prices (KNBS). Red = rising faster than overall inflation.</p>'),
+            det_id="everyday-prices"))
+
+    # ---- sources and the check
+    xc = m.get("cross_check") or {}
+    diffs = xc.get("differences") or []
+    check = (f"Checked: the Central Bank's 12-month figures match the IMF consumer price index for "
+             f"{xc.get('compared', 0) - len(diffs)} of {xc.get('compared', 0)} months since 2021"
+             + (" — they differ for " + ", ".join(f"{dt.date.fromisoformat(d):%b %Y} (CBK {a:g}%, index "
+                                                    f"{b:g}%)" for d, a, b in diffs[:4]) if diffs else "") + ". ")
+    src = ('Sources: <a href="https://www.centralbank.go.ke/inflation-rates/" target="_blank" rel="noopener">Central '
+           'Bank of Kenya</a> (inflation, T-bill and Central Bank rates, USD/KES), the IMF\'s consumer price index for '
+           'Kenya, the Kenya National Bureau of Statistics monthly release'
+           + (f' (<a href="{ui.href(k["url"])}" target="_blank" rel="noopener">{mname}</a>)' if k.get("url") else "")
+           + ' and FRED (US prices).')
+    parts.append(Markup(f'<p class="footnote">{escape(check)}{src}</p>'))
+    parts.append(_explainer(_INFLATION_EXPLAIN, "What inflation means for your money (plain English)",
+                            "Five ideas that tell you whether your money is really growing.", det_id="inflation-explained",
+                            good=False))
+    return ui.section(_join(parts), title=f"Inflation in Kenya — {yoy:.2f}% ({mname})", sec_id="inflation",
+                      icon="trend-up", term="inflation",
+                      sub="What your money has to beat. Updated every month by the Kenya National Bureau of Statistics.")
+
+
+def pulse(rg, p, inflation_data=None, tbill_pct=None):
     cbk = p.get("cbk") or {}
     cbr = cbk.get("cbr_pct")
+    cbr_month = None
+    if cbr is None and (inflation_data or {}).get("cbr_latest"):      # the homepage didn't say: CBK's monthly figure
+        cbr_month, cbr = inflation_data["cbr_latest"]
     notes = ""
     if cbk.get("cbr_note"):
         notes += f'<p class="footnote"><strong>MPC statement:</strong> {escape(cbk["cbr_note"])}</p>'
@@ -940,7 +1136,8 @@ def pulse(rg, p):
         notes += f'<p class="footnote"><strong>Inflation:</strong> {escape(cbk["inflation_note"])}</p>'
     src = ui.href(cbk.get("source_url") or "") or "#"
     cbk_card = ui.card(
-        ui.kpi_row([ui.kpi("Central Bank Rate (CBR)", f"{cbr:.2f}%" if cbr is not None else "—", term="cbr")],
+        ui.kpi_row([ui.kpi("Central Bank Rate (CBR)", f"{cbr:.2f}%" if cbr is not None else "—", term="cbr",
+                           sub=f"CBK monthly figure, {cbr_month:%B %Y}" if cbr_month else None)],
                    cls="kpis-1")
         + Markup(notes + f'<p class="footnote">Source: <a href="{src}" target="_blank" rel="noopener">'
                          'centralbank.go.ke</a>. Higher CBR usually pressures bank loan books but boosts their bond '
@@ -1028,6 +1225,7 @@ def pulse(rg, p):
         "Context around the NSE trading day — the macro forces that shape prices. Everything here is "
         "<strong>refreshed on every run</strong> from named sources; nothing is auto-classified into a "
         "\"sentiment\" (see the note at the bottom of the headlines section).",
+        inflation_section(inflation_data, tbill_pct) if inflation_data is not None else "",
         macro,
         Markup(f'<div class="grid-2 pulse-row2">{african}{foreign_link}</div>') if african else foreign_link,
         news_html,

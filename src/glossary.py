@@ -202,6 +202,19 @@ _TERMS = {
     "price-cross-check": ("Price check", "The fund's prices come from two independent places (the fund manager and "
                           "the Financial Times) and are compared day by day; any difference is shown, never hidden. "
                           "Your statement's price is checked too."),
+    "inflation": ("Inflation", "How much more the same everyday things cost than a year earlier (Kenya's consumer "
+                  "price index, measured monthly by KNBS). Money that grows slower than this buys less each year."),
+    "inflation-target": ("Inflation target", "The Central Bank of Kenya aims for 5% inflation; 2.5% to 7.5% is its "
+                         "acceptable band. Outside it, the Central Bank Rate usually moves to pull inflation back."),
+    "real-rate": ("Real interest rate", "An interest rate minus inflation: what the money really earns in buying "
+                  "power. Positive = savers win; negative = prices rise faster than the interest."),
+    "core-inflation": ("Core and non-core inflation", "Non-core = food and energy, which swing with harvests and fuel "
+                       "prices. Core = everything else — the steadier, underlying trend."),
+    "real-gain": ("Gain after inflation", "What your investments are worth now (plus income they paid you) minus "
+                  "what you put in grown by inflation since — i.e. how much more (or less) you can buy than with "
+                  "the money you put in."),
+    "real-return": ("Real yearly return", "Your yearly growth rate after inflation — counting when each amount "
+                    "went in and came out. Above 0% means your money is truly growing."),
     "profit-periods": ("Profit by day, week and month", "How much your units made or lost in US dollars: units held × "
                        "the change in price per unit, plus payouts. Top-ups are not profit, so they're left out, "
                        "and the sales charge counts as a small loss on the day it's taken."),
