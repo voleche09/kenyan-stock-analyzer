@@ -1037,6 +1037,21 @@ small.block { display: block; }
 .row-you td { background: color-mix(in srgb, var(--c-funds) 9%, transparent); font-weight: 650; }
 .sub-h { margin: 20px 0 8px; font-size: 14px; font-weight: 700; color: var(--text-2); }
 
+/* ------------------------------------------------------------------ inflation */
+.s-infl { --lg-c: var(--down); stroke: var(--down); fill: var(--down); }
+.chart-svg .ln.s-infl { stroke-width: 2.4; }
+.chart-svg .bar.s-infl { fill: var(--c3); opacity: .85; }
+.s-tbill { --lg-c: var(--c-bonds); stroke: var(--c-bonds); fill: var(--c-bonds); }
+.s-cbr { --lg-c: var(--c6); stroke: var(--c6); fill: var(--c6); stroke-dasharray: 4 3; }
+.s-core { --lg-c: var(--c1); stroke: var(--c1); fill: var(--c1); }
+.s-noncore { --lg-c: var(--c3); stroke: var(--c3); fill: var(--c3); }
+.ref.band { stroke: var(--warn); stroke-dasharray: 4 4; } .ref-label.band { color: var(--warn); }
+.ref.target { stroke: var(--up-line); stroke-dasharray: 2 4; } .ref-label.target { color: var(--up); }
+.infl-verdict { margin: 0 0 14px; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--surface);
+                border-left: 4px solid var(--accent); line-height: 1.55; }
+.infl-verdict[data-tone="up"] { border-left-color: var(--up-line); }
+.infl-verdict[data-tone="down"] { border-left-color: var(--down-line); }
+
 /* ------------------------------------------------------------------ print */
 @media print {
   :root, :root[data-theme="dark"] {

@@ -222,7 +222,7 @@ def _upcoming(when, today):
 
 # ------------------------------------------------------------------ Summary tab
 def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_summary, fundamentals,
-                 intl_fundamentals, nse_history, intl_history, today, funds_summary=None):
+                 intl_fundamentals, nse_history, intl_history, today, funds_summary=None, inflation=None):
     if nw is None:
         return ui.empty_state("Nothing here yet", "Add your Kenyan shares, bonds, international shares or funds — "
                               "see the tabs above for how — and this summary fills in.", icon="briefcase")
@@ -375,6 +375,12 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
     parts_card = ui.card(Markup(f'<div class="part-grid">{_join(part_blocks)}</div>'),
                          title="Your four parts" if nw["has_funds"] else "Your three parts", icon="layers")
     parts.append(Markup(f'<div class="grid-2 summary-mid">{alloc_card}{parts_card}</div>'))
+    if inflation is not None:
+        try:
+            parts.append(_after_inflation(inflation))
+        except Exception as e:                       # noqa: BLE001 — logged, never fatal
+            import logging
+            logging.getLogger(__name__).error(f"After-inflation section skipped: {type(e).__name__}: {e}")
 
     # ---- insights
     parts.append(Markup('<div class="grid-3 insights">'
@@ -390,6 +396,130 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
     parts.append(Markup('<p class="footnote">Information, not financial advice — each tab has the full note on '
                         'where its figures come from. These files are never committed to git.</p>'))
     return _join(parts)
+
+
+_DATE_HELP = {
+    "stocks": "add each purchase's date in the <code>buy_date</code> column of <code>portfolio/holdings.csv</code>",
+    "intl": "add each purchase's date in the <code>buy_date</code> column of "
+            "<code>portfolio/international_holdings.csv</code>",
+    "funds": "add when you first invested in the <code>invested_since</code> column of <code>portfolio/funds.csv</code> "
+             "— or run <code>./venv/bin/python3 fund.py since ISIN YYYY-MM-DD</code>",
+    "bonds": "add the <code>purchase_date</code> in <code>portfolio/bonds.csv</code> if you bought later than the issue",
+}
+
+
+def _after_inflation(inf):
+    """Are you really getting richer? Your money vs Kenya's consumer prices —
+    since you bought (holdings with dates) and this year's race (no dates
+    needed). Figures come from inflation.portfolio_real() / race()."""
+    macro = (inf or {}).get("macro") or {}
+    lt = macro.get("latest")
+    if not lt:
+        return ui.section(Markup('<p class="muted">Kenya\'s inflation figures didn\'t load this run, so the '
+                                 'after-inflation view is skipped — it\'s back next run.</p>'),
+                          title="After inflation", sec_id="after-inflation", icon="trend-up", term="real-gain")
+    real, rc = inf.get("real") or {}, inf.get("race")
+    month = dt.date.fromisoformat(lt["month"])
+    tot = real.get("total")
+    parts = []
+    if tot and tot["put_in"]:
+        since = dt.date.fromisoformat(tot["since"])
+        bite = tot["inflation_cost"] / tot["put_in"] * 100.0
+        better = tot["real_gain"] >= 0
+        parts.append(Markup(
+            f'<p class="infl-verdict" data-tone="{"up" if better else "down"}">'
+            f'Since {since:%B %Y}, prices in Kenya have risen enough that the <b class="private">'
+            f'{escape(money(tot["put_in"]))}</b> you put into these holdings would need to be <b class="private">'
+            f'{escape(money(tot["put_in_today"]))}</b> today to buy the same things (+{bite:.1f}%). They\'re worth '
+            f'<b class="private">{escape(money(tot["value"] + tot["income"]))}</b> now, counting income paid to you. '
+            f'<b>After inflation you are {abs(tot["real_gain_pct"] or 0):.1f}% {"better" if better else "worse"} off</b> '
+            f'— you can buy {"more" if better else "less"} than with the money you put in.</p>'))
+    else:
+        parts.append(Markup('<p class="infl-verdict">Add the dates you bought your holdings (list below) to see '
+                            'whether each has beaten inflation since you bought it. Until then, this year\'s race '
+                            'against inflation is underneath.</p>'))
+    kpis = [ui.kpi("Inflation, last 12 months", f"{lt['yoy']:.2f}%", term="inflation", href_to="pulse.html#inflation",
+                   sub=f"Kenya, {month:%B %Y} · the rate your money has to beat")]
+    if tot:
+        kpis += [
+            ui.kpi("Gain after inflation", money(tot["real_gain"], sign=True), tone=tone(tot["real_gain"]),
+                   private=True, term="real-gain",
+                   delta_html=ui.delta(tot["real_gain_pct"], fmt="{:+.1f}%") if tot.get("real_gain_pct") is not None
+                   else None, sub="extra buying power vs what you put in"),
+            ui.kpi("Gain before inflation", money(tot["gain"], sign=True), tone=tone(tot["gain"]), private=True,
+                   term="gain-loss", sub="value + income − money put in"),
+            ui.kpi("Taken by rising prices", money(tot["inflation_cost"]), tone="down", private=True,
+                   term="inflation", sub=f"since {dt.date.fromisoformat(tot['since']):%b %Y}"),
+        ]
+    undated = real.get("undated", 0) if real else 0
+    kpis.append(ui.kpi("Holdings without a date", str(undated), tone="down" if undated else "up",
+                       sub="left out until dated — see below" if undated else "every holding is included"))
+    parts.append(ui.kpi_row(kpis, cls="kpis-summary"))
+
+    rows = []
+    for key in ("stocks", "bonds", "intl", "funds"):
+        p = (real.get("parts") or {}).get(key)
+        if not p or not p.get("result"):
+            continue
+        r = p["result"]
+        rows.append([ui.cell(Markup(f'<i class="sw {key}"></i> {escape(p["label"])}'), sort=p["label"]),
+                     ui.cell(dt.date.fromisoformat(r["since"]).strftime("%b %Y"), sort=r["since"]),
+                     ui.cell(money(r["put_in"]), sort=r["put_in"], cls="private"),
+                     ui.cell(money(r["put_in_today"]), sort=r["put_in_today"], cls="private"),
+                     ui.cell(money(r["value"] + r["income"]), sort=r["value"] + r["income"], cls="private"),
+                     ui.cell(Markup(f'{escape(money(r["gain"], sign=True))}<small> {escape(pct(r["gain_pct"]))}</small>'),
+                             sort=r["gain"], tone=tone(r["gain"]), cls="private"),
+                     ui.cell(Markup(f'{escape(money(r["real_gain"], sign=True))}<small> '
+                                    f'{escape(pct(r["real_gain_pct"]))}</small>'),
+                             sort=r["real_gain"], tone=tone(r["real_gain"]), cls="private")])
+    if rows:
+        parts.append(ui.table([ui.Col("Part", sort="text"), ui.Col("Since", sort="text"),
+                               ui.Col("Put in", sort="number", term="cost-basis"),
+                               ui.Col("Needed today for the same buying power", sort="number", term="inflation"),
+                               ui.Col("Worth now + income", sort="number"),
+                               ui.Col("Gain before inflation", sort="number", term="gain-loss"),
+                               ui.Col("Gain after inflation", sort="number", term="real-gain")],
+                              rows, table_id="t-after-inflation"))
+    if rc and rc.get("rows"):
+        race_rows = [[ui.cell(Markup("<strong>Inflation — the rate to beat</strong>")),
+                      ui.cell(f'{rc["inflation"]:.2f}%', sort=rc["inflation"]), ui.cell("—"),
+                      ui.cell(f"Kenya, 12 months to {month:%B %Y}", cls="small muted")]]
+        for what, rate, note, edge in rc["rows"]:
+            race_rows.append([ui.cell(what), ui.cell(f"{rate:.2f}%", sort=rate),
+                              ui.cell(f"{edge:+.2f} pts", sort=edge, tone=tone(edge)),
+                              ui.cell(note, cls="small muted")])
+        parts.append(Markup('<h3 class="sub-h">This year\'s race against inflation (no dates needed)</h3>'))
+        parts.append(ui.table([ui.Col("", sort=None), ui.Col("Yearly rate", sort="number"),
+                               ui.Col("Ahead of inflation by", sort="number", term="real-rate"), ui.Col("What it is")],
+                              race_rows, table_id="t-inflation-race", sortable=False))
+    missing = []
+    for key in ("stocks", "intl", "funds", "bonds"):
+        p = (real.get("parts") or {}).get(key) or {}
+        items = p.get("undated") or []
+        if items:
+            shown = ", ".join(escape(x) for x in items[:8]) + (f" and {len(items) - 8} more" if len(items) > 8 else "")
+            missing.append(f'<li><b>{escape(p["label"])}</b> ({len(items)}): <span class="private">{shown}</span> — '
+                           f'{_DATE_HELP[key]}.</li>')
+        if p.get("too_early"):
+            missing.append(f'<li><b>{escape(p["label"])}</b>: {len(p["too_early"])} bought before Feb 2009 — Kenya\'s '
+                           'price index on this dashboard starts then, so they\'re left out.</li>')
+        if key == "bonds" and p.get("assumed"):
+            missing.append(f'<li><b>Bonds</b>: {len(p["assumed"])} without a purchase date are assumed bought when '
+                           f'they were issued — {_DATE_HELP["bonds"]}.</li>')
+    if missing:
+        parts.append(ui.details(f"📅 Add purchase dates to include everything ({undated} holding(s) without one)",
+                                Markup(f'<ul class="plain-list">{"".join(missing)}</ul>'), det_id="add-dates",
+                                open_=bool(undated) and not tot))
+    parts.append(Markup(
+        '<p class="footnote">How it works: every amount is moved to today\'s shillings with Kenya\'s consumer price '
+        'index (KNBS, via the IMF), so a shilling put in years ago counts for what it could buy then. US-dollar '
+        'amounts are converted at the month\'s average rate when they happened and today\'s rate now, so the '
+        'shilling\'s moves against the dollar count too. Not included: dividends on shares (they aren\'t recorded), '
+        'and fund payouts paid before your statement date. A fund with a monthly top-up is taken as paid in evenly '
+        'each month from its "since" date up to the statement.</p>'))
+    return ui.section(_join(parts), title="After inflation — are you really getting richer?", sec_id="after-inflation",
+                      icon="trend-up", term="real-gain",
+                      sub="Your money compared with what it can buy — the result that matters when prices keep rising.")
 
 
 def _moves_card(rg, nw, ps, ips, fs=None):
@@ -1330,7 +1460,7 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
           portfolio_history=None, portfolio_news=None, portfolio_history_tracker=None,
           intl_portfolio_history=None, intl_portfolio_news=None, intl_portfolio_history_tracker=None,
           fundamentals=None, intl_fundamentals=None, nse_history=None, intl_history=None, today=None,
-          funds_summary=None):
+          funds_summary=None, inflation=None):
     """The whole My Portfolio page body (Markup)."""
     import page_funds
     today = today or dt.date.today()
@@ -1354,7 +1484,8 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
         ("summary", "Summary", _summary_tab(rg, nw, portfolio_summary=ps, bond_portfolio=bp,
                                             intl_portfolio_summary=ips, fundamentals=fundamentals,
                                             intl_fundamentals=intl_fundamentals, nse_history=nse_history,
-                                            intl_history=intl_history, today=today, funds_summary=fs), None),
+                                            intl_history=intl_history, today=today, funds_summary=fs,
+                                            inflation=inflation), None),
         ("kenyan", "Kenyan stocks", _kenyan_tab(rg, ps, history_rows=portfolio_history,
                                                 tracker=portfolio_history_tracker, nse_history=nse_history),
          len(ps["holdings"]) if ps else None),

@@ -483,6 +483,7 @@ def compute_bond(lot, as_of=None):
         "cost_basis": round(cost_basis, 2),
         "purchase_price_pct": price_pct,
         "purchase_date": purchase_date.isoformat(),
+        "purchase_date_assumed": not lot.get("purchase_date"),     # blank = bought at issue (assumed)
         "coupon_pct": coupon_pct,
         "tax_free": ref["tax_free"],
         "withholding_pct": withholding_pct,

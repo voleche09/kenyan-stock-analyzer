@@ -16,6 +16,8 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **Similar stocks** — peer comparison by sector, market cap, and valuation
 - **Sector performance** — sector-by-sector breakdown with average returns
 - **Market breadth** — advance/decline, % above SMA50, bullish MACD ratio
+- **Kenya's inflation (Market Pulse)** — the latest 12-month rate against the Central Bank's 2.5–7.5% band, month by month since 2005 (with the 91-day T-bill rate and the Central Bank Rate alongside), year by year, what's getting more expensive (the 13 spending groups, core vs non-core, everyday prices like maize flour and petrol), the real T-bill rate, the shilling against the dollar, and what inflation does to savings — from the Central Bank of Kenya, KNBS and the IMF's price index, cross-checked month by month
+- **After inflation** — on My Portfolio: whether your investments have really grown since you bought them, once prices are taken into account (each purchase moved to today's shillings with Kenya's consumer price index, US-dollar amounts at the rate of the day), plus this year's race against inflation (T-bills, your bonds' yield, your funds) that needs no dates
 - **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds, US-listed stocks and mutual funds, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
 - **🏦 Mutual funds** — funds you hold through your bank, priced every run at the fund's published price per unit (from the fund manager's own data where it can be read directly, otherwise the Financial Times' fund data) and checked day by day against a second source. Your value, gain and today's move; profit by day, week and month; returns over every period and calendar year with payouts included (reconciled with the managers' published figures); payouts and payout yield; what each fund holds; how it compares with its competitors; news. Monthly top-ups and payouts are recorded automatically — exactly once each — with the bank's sales charge taken off, and you confirm the units when your statement arrives — see [Mutual funds](#-mutual-funds)
 - **⭐ Watchlist — NSE and international** — follow any Nairobi stock or any stock Yahoo Finance lists (US, London, Johannesburg, …) on its own page: a chart with *your* buy/sell prices drawn in, a plain-English signal checklist (trend, momentum, valuation, analysts, dividend), "needs your attention" alerts, key dates and news — see [Watchlist](#-watchlist)
@@ -105,6 +107,7 @@ Copy the figures from your bank statement into `portfolio/funds.csv` (template: 
 ```bash
 ./venv/bin/python3 fund.py add ISIN UNITS AVG_COST --as-of YYYY-MM-DD --nav PRICE --name "Fund name" --payouts reinvest --monthly 50 --day 15 --fee 2
 ./venv/bin/python3 fund.py list                       # what's recorded, including automatic top-ups and payouts
+./venv/bin/python3 fund.py since ISIN YYYY-MM-DD      # when you first invested — for "after inflation"
 ./venv/bin/python3 fund.py confirm ISIN REF UNITS     # your statement arrived: its units for an automatic row
 ```
 
@@ -165,7 +168,7 @@ Nairobi is UTC+3, so 15:00 EAT = 12:00 UTC.
 Get a **1-page PDF summary of key metrics emailed to you every weekday at ~10 pm EAT** — automatically, on GitHub's servers, whether or not your computer is on.
 
 The summary is a subset of the dashboard (the dashboard itself is unchanged) and includes:
-- Market pulse — bullish/bearish counts, breadth, USD/KES
+- Market pulse — bullish/bearish counts, breadth, USD/KES, Kenya's inflation
 - **Data quality** — how many prices were independently verified vs flagged as mismatched/stale
 - Your watchlist — TV signal (Buy/Sell), price, change, yield, score
 - Top gainers/losers
@@ -446,6 +449,8 @@ kenyan_stock_analyzer/
 │   ├── page_funds.py           # The Funds tab and each fund's own page
 │   ├── funds_portfolio.py      # Your mutual funds: units, top-ups, payouts, returns (private)
 │   ├── fund_data.py            # Fund prices, payouts and facts by ISIN (fund managers + FT)
+│   ├── inflation_data.py       # Kenya's inflation, price index, T-bill / CBR and USD/KES history
+│   ├── inflation.py            # "After inflation": your holdings in today's shillings
 │   ├── page_stock.py           # Every stock's own page (NSE and international)
 │   ├── ui_theme.py             # The page shell shared by every page (+ ui_theme.css, ui_runtime.js)
 │   ├── ui_kit.py               # Small building blocks: headline figures, tabs, tables, ⓘ buttons…
@@ -487,6 +492,10 @@ All fundamental and technical data is sourced from **TradingView** via the `tvki
 | Historical data (fallback) | Yahoo Finance | `yfinance` |
 | Mutual fund prices and payouts | The fund manager's website where supported, cross-checked with the Financial Times | public fund-data pages / JSON |
 | Mutual fund facts and holdings | Financial Times fund pages | HTML |
+| Kenya inflation (12-month, monthly since 2005) | Central Bank of Kenya, cross-checked with the IMF price index | CSV |
+| Kenya consumer price index (monthly since 2009) | IMF (base Feb 2019 = 100, as KNBS) | SDMX CSV |
+| What's driving inflation, everyday prices | KNBS monthly CPI release | PDF → text |
+| 91-day T-bill rate, Central Bank Rate, USD/KES history | Central Bank of Kenya | CSV |
 
 ## Metrics Included
 

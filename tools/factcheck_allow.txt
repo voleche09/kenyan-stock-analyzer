@@ -70,3 +70,8 @@ sentence fundamentals ^green = good , amber = average , red = weak/risky , black
 # colour (deeper in light mode), not always "brighter".
 sentence visuals \(brighter = bigger move\)$
 sentence visuals · brighter = bigger move · hover a tile for details$
+
+# --- Charts -----------------------------------------------------------------
+# A chart spanning more than three years labels its axis with years (2017 2022
+# 2026) instead of month names that never said which year.
+sentence * ^((jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec) ?)+$

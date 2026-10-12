@@ -186,6 +186,7 @@ spot and fix it.
 | `fee_pct` | No | The sales charge your bank takes from each purchase, in % (e.g. `2`). |
 | `peers` | No | Competitor funds to compare with — their ISINs, separated by `;`. Use accumulating share classes, so payouts count for everyone. |
 | `factsheet_url` | No | The fund's page on its manager's website. For managers whose data the dashboard can read directly this switches on the manager's own prices and payout history (otherwise prices come from the Financial Times' fund data). |
+| `invested_since` | No | When you first put money into the fund (approximate is fine) — for **After inflation** on My Portfolio. With a monthly top-up, the statement's cost is taken as paid in evenly each month from this date; without one, all on it. `./venv/bin/python3 fund.py since ISIN YYYY-MM-DD` sets it. |
 | `note` | No | Anything you like. |
 
 **`fund_transactions.csv` — what happened after the statement date:**
@@ -212,6 +213,16 @@ fund manager hasn't published yet uses the last published amount, marked
 isin,name,units,avg_cost,as_of,statement_nav,payouts,monthly_amount,monthly_day,fee_pct
 XS9000000018,Sample Global Bond Income Fund A (USD) Dist,400,9.80,2026-03-31,9.9120,reinvest,50,15,2
 ```
+
+### Dates and "after inflation"
+
+My Portfolio's **After inflation** section shows whether each holding has
+really grown since you bought it, once rising prices are counted. It needs to
+know *when* you bought: fill in `buy_date` (shares), `purchase_date` (bonds —
+blank means "bought at issue") and `invested_since` (funds). A holding without
+a date is listed there and left out rather than guessed; this year's race
+against inflation (T-bills, your bonds' yield, your funds' last 12 months)
+works without any dates.
 
 ## What the reader accepts (and what it deliberately refuses)
 

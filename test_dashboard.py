@@ -27,6 +27,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "too
 
 from analysis_engine import AnalysisEngine           # noqa: E402
 import bonds_portfolio                                 # noqa: E402
+import inflation_data  # noqa: E402
 import company_logos                                   # noqa: E402
 import fake_bonds                                      # noqa: E402  made-up bonds, never real ones
 import international_portfolio                         # noqa: E402
@@ -87,7 +88,8 @@ def offline():
     with mock.patch.object(company_logos, "fetch_logo_base64", return_value=None), \
             mock.patch("foreign_flows.load", return_value=flows), \
             mock.patch("market_pulse.load_all", return_value=pulse), \
-            mock.patch("treasury_securities.load_treasury", return_value=treasury):
+            mock.patch("treasury_securities.load_treasury", return_value=treasury), \
+            mock.patch("inflation_data.fetch_all", return_value=inflation_data.summarise([], [], [], [], [], None)):
         yield
 
 
