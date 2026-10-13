@@ -1052,6 +1052,14 @@ small.block { display: block; }
 .infl-verdict[data-tone="up"] { border-left-color: var(--up-line); }
 .infl-verdict[data-tone="down"] { border-left-color: var(--down-line); }
 
+/* ------------------------------------------------------------------ your sales */
+.sold-line { margin: 4px 0 10px; font-size: 0.92rem; }
+.sales-table td small { display: block; color: var(--text-muted); font-size: 12px; font-weight: 450; }
+table.data.sales-table td.small { white-space: normal; min-width: 190px; max-width: 320px; }
+table.data.sales-table td:nth-child(2) { white-space: normal; min-width: 150px; max-width: 230px; }
+.sold-line b[data-tone="up"], .fund-card b[data-tone="up"] { color: var(--up); }
+.sold-line b[data-tone="down"], .fund-card b[data-tone="down"] { color: var(--down); }
+
 /* ------------------------------------------------------------------ print */
 @media print {
   :root, :root[data-theme="dark"] {

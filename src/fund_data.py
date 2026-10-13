@@ -584,3 +584,20 @@ def fetch_all(funds, cache_dir, *, today=None, workers=6, force=False):
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         return dict(pool.map(one, list(jobs)))
+
+
+def cached(isin, cache_dir):
+    """The last prices saved for a fund (any day), without going online —
+    for the sale form's price hint. None if there's nothing saved."""
+    if os.environ.get("FUND_DATA_FILE"):
+        try:
+            with open(os.environ["FUND_DATA_FILE"], encoding="utf-8") as fh:
+                d = json.load(fh).get(isin)
+            return _from_json(d) if d else None
+        except (OSError, ValueError):
+            return None
+    try:
+        with open(os.path.join(cache_dir, "funds", f"{isin}.json"), encoding="utf-8") as fh:
+            return _from_json(json.load(fh))
+    except (OSError, ValueError):
+        return None

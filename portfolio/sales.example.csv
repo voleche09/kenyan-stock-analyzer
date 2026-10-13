@@ -1,0 +1,4 @@
+date,kind,code,quantity,sell_price,fees,note
+2026-05-04,nse,EQTY,200,52.50,85,EXAMPLE sale - replace with your own (kind: nse / intl / bond)
+2026-06-12,intl,AAPL,2.5,214.10,,quantity can be part of what you hold - or all of it
+2026-07-20,bond,FXD9/2020/020,100000,101.25,,a bond: face value sold and the clean price in % of face

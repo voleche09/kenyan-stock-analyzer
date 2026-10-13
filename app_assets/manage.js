@@ -5,8 +5,9 @@
  * every .app-only control stays hidden.
  *
  * Adds: the "App running · 🔄 Update" pill, ☆ watch buttons, the watchlist
- * search/add/edit/remove controls, the "Record a purchase" form and the
- * "Your entries" list. All data is inserted with textContent — never as HTML.
+ * search/add/edit/remove controls, the "Record a purchase" and "Record a
+ * sale" forms and the "Your entries" list. All data is inserted with
+ * textContent — never as HTML.
  */
 (function () {
   'use strict';
@@ -132,6 +133,7 @@
   function runUndo(u) {
     if (u.kind === 'watchlist') undoRemove(u.data);
     else if (u.kind === 'holding') undoHolding(u.data.kind, u.data.removed);
+    else if (u.kind === 'sale') undoSale(u.data);
   }
   function restoreUndo() {
     var u = null;
@@ -646,7 +648,11 @@
     show('nse');
   }
 
-  function purchaseFlow(container, kind, collect, resetForm) {
+  // Review → Save, shared by "Record a purchase" and "Record a sale": the
+  // server checks everything first (dry run) and shows it back in words.
+  function purchaseFlow(container, kind, collect, resetForm, opts) {
+    opts = opts || {};
+    var endpoint = opts.endpoint || '/api/holdings/add';
     var err = h('div', { class: 'ma-error', role: 'alert' });
     var review = h('div', { class: 'ma-review' });
     var reviewBtn = h('button', { type: 'submit', class: 'ma-btn ma-btn-primary', text: 'Review →' });
@@ -663,7 +669,7 @@
       if (!payload) return Promise.resolve(null);
       payload.kind = kind;
       payload.dry_run = dry;
-      return api('POST', '/api/holdings/add', payload);
+      return api('POST', endpoint, payload);
     }
     container.closest('form').addEventListener('submit', function (e) {
       e.preventDefault();
@@ -675,7 +681,7 @@
         if (!r) return;
         if (!r.ok) { err.textContent = errorText(r); return; }
         var warn = (r.data.warnings || []);
-        var save = h('button', { type: 'button', class: 'ma-btn ma-btn-primary', text: warn.length ? '✅ Yes, save it anyway' : '✅ Save purchase' });
+        var save = h('button', { type: 'button', class: 'ma-btn ma-btn-primary', text: warn.length ? '✅ Yes, save it anyway' : (opts.saveText || '✅ Save purchase') });
         var change = h('button', { type: 'button', class: 'ma-btn', text: 'Change something', onclick: clearReview });
         review.appendChild(h('div', { class: 'ma-summary' }, [h('span', { text: '🧾 ' }), h('strong', { text: r.data.summary })]));
         warn.forEach(function (w) { review.appendChild(h('div', { class: 'ma-warn', text: '⚠️ ' + w })); });
@@ -692,6 +698,7 @@
             markDirty(container.closest('.ma-tab-body'), false);
             resetForm();
             toast(r2.data.message + ' Your portfolio page will update by itself in about 2 minutes.', 'ok', null, 15000);
+            if (opts.onSaved) opts.onSaved(r2.data);
             loadEntries();
             poll(true);
           });
@@ -789,6 +796,194 @@
     }, function () { issue.value = ''; face.value = ''; pct.value = '100'; date.value = todayISO(); note.value = ''; });
   }
 
+  // ------------------------------------------------------------------ record a sale
+  var SALE_INFO = {
+    nse: { tab: '🇰🇪 Kenyan stock', cur: 'KES', market: 'NSE' },
+    intl: { tab: '🌍 International stock', cur: 'USD', market: 'INTL' },
+    bond: { tab: '🏦 Bond', cur: 'KES', market: null },
+    fund: { tab: '📊 Fund', cur: 'USD', market: null }
+  };
+
+  function fmtQty(q, kind) {
+    q = num(q);
+    if (q === null) return '—';
+    if (kind === 'bond') return fmtMoney(q, 'KES');
+    if (kind === 'fund') return q.toLocaleString('en-US', { minimumFractionDigits: 3, maximumFractionDigits: 3 }) + ' units';
+    return q.toLocaleString('en-US', { maximumFractionDigits: 6 }) + ' share' + (q === 1 ? '' : 's');
+  }
+
+  function initSalePanel(panel) {
+    panel.appendChild(h('h2', { text: '💰 Record a sale' }));
+    panel.appendChild(h('p', { class: 'ma-help', text: 'Sold some or all of a holding? Pick it, say how much and the price — the dashboard works out your profit or loss, keeps the average cost of what\'s left, and updates your portfolio by itself (in about 2 minutes). Made a mistake? Remove it in "📝 Your entries".' }));
+    var tabs = h('div', { class: 'ma-tabs', role: 'tablist' });
+    var body = h('div', { class: 'ma-tab-body' });
+    panel.appendChild(tabs);
+    panel.appendChild(body);
+    var buttons = {};
+    Object.keys(SALE_INFO).forEach(function (kind) {
+      var b = h('button', { type: 'button', class: 'ma-tab', role: 'tab', text: SALE_INFO[kind].tab, onclick: function () { show(kind); } });
+      buttons[kind] = b;
+      tabs.appendChild(b);
+    });
+    function show(kind) {
+      if (body.getAttribute('data-ma-dirty') === '1' && !window.confirm('Discard what you typed in this form?')) return;
+      Object.keys(buttons).forEach(function (k) {
+        buttons[k].classList.toggle('active', k === kind);
+        buttons[k].setAttribute('aria-selected', k === kind ? 'true' : 'false');
+      });
+      body.textContent = '';
+      markDirty(body, false);
+      buildSaleForm(body, kind);
+    }
+    show('nse');
+  }
+
+  function buildSaleForm(body, kind) {
+    var info = SALE_INFO[kind], fund = kind === 'fund', bond = kind === 'bond';
+    var positions = {}, sellAll = false, priceTouched = false;
+    var pick = h('select', { class: 'ma-input' }, [h('option', { value: '', text: 'Loading what you hold…' })]);
+    var held = h('div', { class: 'ma-hint' });
+    var qty = textInput({ inputmode: 'decimal', placeholder: bond ? 'e.g. 100000' : fund ? 'e.g. 12.345' : 'e.g. 500' });
+    var allBtn = h('button', { type: 'button', class: 'ma-chip-btn', text: 'Sell all', 'aria-pressed': 'false' });
+    var price = textInput({ inputmode: 'decimal', value: bond ? '100' : '',
+      placeholder: bond ? 'e.g. 101.25' : fund ? 'optional — e.g. 1250.40' : (kind === 'nse' ? 'e.g. 48.50' : 'e.g. 210.25') });
+    var priceHint = h('span', { class: 'ma-hint' });
+    var fees = textInput({ inputmode: 'decimal', placeholder: 'optional' });
+    var date = h('input', { type: 'date', class: 'ma-input', value: todayISO(), max: todayISO() });
+    var note = textInput({ maxlength: '200', placeholder: 'optional — e.g. broker' });
+    var preview = h('div', { class: 'ma-preview', 'aria-live': 'polite' });
+    var form = h('form', { class: 'ma-form', novalidate: true });
+
+    function current() { return positions[pick.value] || null; }
+    function setAll(on) {
+      var p = current(), was = sellAll;
+      sellAll = on && !!p;
+      allBtn.setAttribute('aria-pressed', sellAll ? 'true' : 'false');
+      allBtn.classList.toggle('active', sellAll);
+      qty.disabled = sellAll;
+      if (sellAll) qty.value = String(p.quantity);
+      else if (was) qty.value = '';
+      update();
+    }
+    function update() {
+      var p = current();
+      preview.textContent = '';
+      if (!p) return;
+      var q = sellAll ? p.quantity : num(qty.value.replace(/,/g, ''));
+      if (q === null || q <= 0) return;
+      var lines = [];
+      if (q > p.quantity + 1e-6) {
+        preview.appendChild(h('div', { class: 'ma-error', text: 'That\'s more than you hold (' + fmtQty(p.quantity, kind) + ').' }));
+        return;
+      }
+      var left = p.quantity - q;
+      var px = num(price.value.replace(/,/g, ''));
+      var fee = num(fees.value.replace(/,/g, '')) || 0;
+      if (fund) {
+        var cash = px !== null ? px : (p.nav ? q * p.nav : null);
+        if (cash !== null) lines.push((px !== null ? 'You receive ' : '≈ ') + fmtMoney(cash, 'USD') + (px === null && p.nav ? ' at the latest price ' + fmtMoney(p.nav, 'USD') + ' (' + p.nav_date + ')' : ''));
+        if (cash !== null && p.avg_cost) { var g = cash - q * p.avg_cost; lines.push((g >= 0 ? 'Profit ≈ +' : 'Loss ≈ −') + fmtMoney(Math.abs(g), 'USD') + ' vs your average cost ' + fmtMoney(p.avg_cost, 'USD')); }
+      } else if (bond) {
+        if (px !== null) lines.push('≈ ' + fmtMoney(q * px / 100, 'KES') + ' at ' + px + '% of face value, plus the interest built up since the last coupon (the review shows the exact figure)');
+      } else if (px !== null) {
+        lines.push(fmtQty(q, kind) + ' × ' + fmtMoney(px, info.cur) + ' = ' + fmtMoney(q * px, info.cur) + (fee ? ' − fees ' + fmtMoney(fee, info.cur) : ''));
+        if (p.avg_cost) { var gain = q * px - fee - q * p.avg_cost; lines.push((gain >= 0 ? 'Profit ≈ +' : 'Loss ≈ −') + fmtMoney(Math.abs(gain), info.cur) + ' vs your average cost ' + fmtMoney(p.avg_cost, info.cur)); }
+      }
+      lines.push(left <= 1e-6 ? 'You\'ll hold none afterwards — it all goes.' : 'You\'ll still hold ' + fmtQty(left, kind) + '.');
+      lines.forEach(function (t, i) { preview.appendChild(h('div', { class: i === lines.length - 1 ? 'ma-hint' : '', text: t })); });
+    }
+    function describeHeld(p) {
+      if (!p) return '';
+      var bits = ['You hold ' + fmtQty(p.quantity, kind)];
+      if (p.avg_cost) bits.push((bond ? 'average price ' + p.avg_cost.toFixed(2) + '%' : 'average cost ' + fmtMoney(p.avg_cost, info.cur)));
+      if (fund && p.nav) bits.push('latest price ' + fmtMoney(p.nav, 'USD') + ' (' + p.nav_date + ')');
+      if (bond && p.maturity_date) bits.push('matures ' + p.maturity_date);
+      return bits.join(' · ');
+    }
+    function onPick() {
+      var p = current();
+      setAll(false);
+      qty.value = '';
+      held.textContent = describeHeld(p);
+      priceHint.textContent = '';
+      if (p && info.market) {
+        priceHint.textContent = 'Checking today\'s price…';
+        api('GET', '/api/quote?symbol=' + encodeURIComponent(p.code) + '&market=' + info.market).then(function (r) {
+          if (current() !== p) return;
+          if (r.ok && r.data.found && r.data.price) {
+            priceHint.textContent = 'Today: ' + fmtMoney(r.data.price, info.cur) + ' — type the price you actually sold at';
+            if (!priceTouched) { price.value = String(r.data.price); update(); }
+          } else {
+            priceHint.textContent = 'Type the price per share you sold at';
+          }
+        });
+      }
+      update();
+    }
+    function load(selectCode) {
+      return api('GET', '/api/positions?kind=' + kind).then(function (r) {
+        pick.textContent = '';
+        positions = {};
+        var list = r.ok ? (r.data.positions || []) : [];
+        if (!r.ok) {
+          held.className = 'ma-error';
+          // 404 = an app started before sales existed is serving this newer page
+          held.textContent = r.status === 404
+            ? 'The dashboard app needs a restart to record sales: close its Terminal window, then open "Open Dashboard.command" again.'
+            : errorText(r);
+        }
+        pick.appendChild(h('option', { value: '', text: !r.ok ? 'Couldn\'t load your holdings' : list.length ? 'Choose what you sold…' : 'Nothing to sell here yet' }));
+        list.forEach(function (p) {
+          positions[p.code] = p;
+          var label = fund ? (p.name + ' — ' + fmtQty(p.quantity, kind)) : (p.code + ' — ' + fmtQty(p.quantity, kind));
+          pick.appendChild(h('option', { value: p.code, text: label }));
+        });
+        if (selectCode && positions[selectCode]) pick.value = selectCode;
+        onPick();
+      });
+    }
+
+    allBtn.addEventListener('click', function () {
+      setAll(!sellAll);
+      form.dispatchEvent(new Event('input', { bubbles: true }));   // a change: review it again before saving
+    });
+    pick.addEventListener('change', onPick);
+    price.addEventListener('input', function () { priceTouched = true; });
+    form.addEventListener('input', function () { markDirty(body, true); update(); });
+
+    var qtyBox = h('div', { class: 'ma-qty' }, [qty, allBtn]);
+    var fields = [
+      field(bond ? 'Face value sold (KES, as you bought it)' : fund ? 'Units sold' : 'Number of shares sold', qtyBox,
+            bond ? 'Or press Sell all' : 'Or press Sell all — no need to type it'),
+      fund ? field('Amount you received (US$)', price, 'Optional: from your bank\'s confirmation. Blank = the fund\'s price on the sale day')
+           : field(bond ? 'Price sold at (% of face value)' : 'Price you sold at, per share (' + info.cur + ')', price, bond ? '100 = at par — the clean price on your contract note' : null),
+      field('Date you sold', date)
+    ];
+    if (!fund) fields.push(field('Fees (' + info.cur + ')', fees, 'Brokerage and other charges, if any'));
+    fields.push(field('Note', note));
+    form.appendChild(field(fund ? 'Fund you sold' : bond ? 'Bond you sold' : 'Stock you sold', pick));
+    form.appendChild(held);
+    form.appendChild(h('div', { class: 'ma-row' }, fields));
+    if (!fund && !bond) form.appendChild(priceHint);
+    form.appendChild(preview);
+    body.appendChild(form);
+    purchaseFlow(form, kind, function () {
+      if (!pick.value) { form.querySelector('.ma-error').textContent = 'First choose what you sold.'; pick.focus(); return null; }
+      var payload = { code: pick.value, quantity: sellAll ? 'all' : qty.value.trim(), sale_date: date.value, note: note.value.trim() };
+      if (fund) payload.amount = price.value.trim();
+      else { payload.sell_price = price.value.trim(); payload.fees = fees.value.trim(); }
+      return payload;
+    }, function () {
+      priceTouched = false;
+      price.value = bond ? '100' : '';
+      fees.value = ''; note.value = ''; date.value = todayISO();
+    }, {
+      endpoint: '/api/sales/add', saveText: '✅ Save sale',
+      onSaved: function () { load(pick.value); }       // what you hold has changed
+    });
+    load();
+  }
+
   // ------------------------------------------------------------------ your entries
   var entriesPanel = null;
   function initEntriesPanel(panel) {
@@ -796,7 +991,7 @@
     var hint = h('span', { class: 'ma-hint', text: '▼ click to show' });
     var details = h('details', { class: 'ma-details' }, [
       h('summary', {}, [h('h2', { text: '📝 Your entries — fix a mistake' }), hint]),
-      h('p', { class: 'ma-help', text: 'Every purchase you\'ve recorded, exactly as it is stored in your private files. Typed something wrong? Remove the entry and record it again. A backup copy is saved before anything is removed.' }),
+      h('p', { class: 'ma-help', text: 'Every purchase and sale you\'ve recorded, exactly as it is stored in your private files. Typed something wrong? Remove the entry and record it again. A backup copy is saved before anything is removed.' }),
       h('div', { class: 'ma-entries' })
     ]);
     details.addEventListener('toggle', function () {
@@ -812,7 +1007,9 @@
     if (!details || !details.open) return;
     var box = entriesPanel.querySelector('.ma-entries');
     box.textContent = 'Loading…';
-    Promise.all(['nse', 'intl', 'bonds'].map(function (k) { return api('GET', '/api/holdings?kind=' + k); })).then(function (rs) {
+    var calls = ['nse', 'intl', 'bonds'].map(function (k) { return api('GET', '/api/holdings?kind=' + k); });
+    calls.push(api('GET', '/api/sales'));
+    Promise.all(calls).then(function (rs) {
       box.textContent = '';
       ['nse', 'intl', 'bonds'].forEach(function (kind, i) {
         var r = rs[i];
@@ -820,7 +1017,71 @@
         if (!r.ok) { box.appendChild(h('div', { class: 'ma-error', text: errorText(r) })); return; }
         renderEntries(box, kind, r.data);
       });
+      box.appendChild(h('h3', { class: 'ma-h3', text: '💰 Sales' }));
+      if (!rs[3].ok) { box.appendChild(h('div', { class: 'ma-error', text: errorText(rs[3]) })); return; }
+      renderSales(box, rs[3].data);
     });
+  }
+
+  var SALE_WORD = { nse: 'Kenyan', intl: 'International', bond: 'Bond' };
+  function renderSales(box, data) {
+    var rows = (data.entries || []).map(function (e) {
+      var cur = e.kind === 'intl' ? 'USD' : 'KES';
+      return { fund: false, e: e, cells: [e.date, (SALE_WORD[e.kind] || e.kind) + ' · ' + e.code,
+        e.kind === 'bond' ? fmtMoney(e.quantity, 'KES') + ' face' : String(e.quantity) + ' shares',
+        e.kind === 'bond' ? e.sell_price + '%' : fmtMoney(e.sell_price, cur), e.fees ? fmtMoney(e.fees, cur) : '—', e.note || ''] };
+    }).concat((data.fund_entries || []).map(function (e) {
+      return { fund: true, e: e, cells: [e.date, 'Fund · ' + e.name, e.units === null || e.units === undefined ? '—' : String(e.units) + ' units',
+        e.amount === null || e.amount === undefined ? 'priced on the next update' : fmtMoney(e.amount, 'USD') + ' received' + (e.status === 'confirmed' ? '' : ' (' + e.status + ')'),
+        '—', e.note || ''] };
+    }));
+    if (!rows.length) { box.appendChild(h('p', { class: 'ma-hint', text: 'No sales recorded yet — use 💰 Record a sale.' })); return; }
+    rows.sort(function (a, b) { return a.cells[0] < b.cells[0] ? 1 : a.cells[0] > b.cells[0] ? -1 : 0; });
+    var tbody = h('tbody');
+    rows.forEach(function (row) {
+      var tr = h('tr', {}, row.cells.map(function (c) { return h('td', { text: c }); }));
+      tr.appendChild(h('td', {}, [h('button', {
+        type: 'button', class: 'ma-btn ma-btn-small ma-btn-danger', text: 'Remove',
+        onclick: function (ev) { removeSale(ev.currentTarget, row); }
+      })]));
+      tbody.appendChild(tr);
+    });
+    box.appendChild(h('div', { class: 'table-wrap' }, [h('table', { class: 'ma-table' }, [
+      h('thead', {}, [h('tr', {}, ['Sold on', 'What', 'How much', 'Price', 'Fees', 'Note', ''].map(function (t) { return h('th', { text: t }); }))]), tbody
+    ])]));
+  }
+
+  function removeSale(btn, row) {
+    var e = row.e;
+    var what = row.cells[1] + ', ' + row.cells[2] + ' on ' + e.date;
+    if (!window.confirm('Remove this sale?\n\n' + what + '\n\nYour holding goes back to what it was before it. A backup copy of the file is kept, and you can undo this straight away.')) return;
+    btn.disabled = true;
+    var expect = row.fund ? { date: e.date, isin: e.isin, units: e.units } : { date: e.date, code: e.code, quantity: e.quantity, sell_price: e.sell_price };
+    api('POST', '/api/sales/remove', { kind: row.fund ? 'fund' : 'sale', line: e.line, expect: expect }).then(function (r) {
+      if (!r.ok) { btn.disabled = false; toast(errorText(r), 'error', null, 0); loadEntries(); return; }
+      rememberUndo({ kind: 'sale', data: { fund: row.fund, removed: r.data.removed }, label: r.data.message });
+      loadEntries();
+      reloadSaleForm();
+      poll(true);
+    });
+  }
+
+  function undoSale(d) {
+    var x = d.removed, payload;
+    if (d.fund) payload = { kind: 'fund', code: x.isin, quantity: x.units, amount: x.amount, sale_date: x.date, note: x.note, status: x.status, price: x.price, undo: true };
+    else payload = { kind: x.kind, code: x.code, quantity: x.quantity, sell_price: x.sell_price, fees: x.fees, sale_date: x.date, note: x.note, undo: true };
+    api('POST', '/api/sales/add', payload).then(function (r2) {
+      toast(r2.ok ? 'Put back: ' + r2.data.summary : errorText(r2), r2.ok ? 'ok' : 'error');
+      loadEntries();
+      reloadSaleForm();
+      poll(true);
+    });
+  }
+
+  // After a sale is removed or put back, what you can sell has changed.
+  function reloadSaleForm() {
+    var active = document.querySelector('#sale-panel .ma-tab.active');
+    if (active && document.querySelector('#sale-panel .ma-tab-body').getAttribute('data-ma-dirty') !== '1') active.click();
   }
 
   function renderEntries(box, kind, data) {
@@ -894,6 +1155,8 @@
         if (wlPanel) { refreshWatching().then(function () { initWatchlistPage(wlPanel); }); }
         var buyPanel = document.getElementById('purchase-panel');
         if (buyPanel) initPurchasePanel(buyPanel);
+        var sellPanel = document.getElementById('sale-panel');
+        if (sellPanel) initSalePanel(sellPanel);
         var entries = document.getElementById('entries-panel');
         if (entries) initEntriesPanel(entries);
         restoreUndo();

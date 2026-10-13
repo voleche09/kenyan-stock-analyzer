@@ -174,11 +174,14 @@ def _part_row(label, value, *, kpi_label=None, tone_=None, private=True, html=No
                   f'<span class="{cls}">{html if html is not None else escape(value)}</span></div>')
 
 
-def _lookbacks(tracker, today_value, cur):
-    """1 Day / 1 Week / 1 Month / 1 Year changes from the daily snapshots."""
+def _lookbacks(tracker, today_value, cur, today_cost=None, realized=None):
+    """1 Day / 1 Week / 1 Month / 1 Year changes from the daily snapshots —
+    performance only: purchases and sales in between aren't counted as gains
+    or losses (see PortfolioHistoryTracker.lookback)."""
     out = []
     for label, days in (("1 Day", 1), ("1 Week", 7), ("1 Month", 30), ("1 Year", 365)):
-        lb = tracker.lookback(today_value, days) if tracker is not None else None
+        lb = tracker.lookback(today_value, days, today_cost=today_cost, realized=realized) \
+            if tracker is not None else None
         if lb:
             out.append(ui.kpi(label, pct(lb["pct_change"]), tone=tone(lb["pct_change"]),
                               sub=f'since {lb["from_date"]} · {money(lb["change_value"], cur, sign=True)}'))
@@ -222,10 +225,11 @@ def _upcoming(when, today):
 
 # ------------------------------------------------------------------ Summary tab
 def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_summary, fundamentals,
-                 intl_fundamentals, nse_history, intl_history, today, funds_summary=None, inflation=None):
+                 intl_fundamentals, nse_history, intl_history, today, funds_summary=None, inflation=None, sales=None):
     if nw is None:
-        return ui.empty_state("Nothing here yet", "Add your Kenyan shares, bonds, international shares or funds — "
-                              "see the tabs above for how — and this summary fills in.", icon="briefcase")
+        empty = ui.empty_state("Nothing here yet", "Add your Kenyan shares, bonds, international shares or funds — "
+                               "see the tabs above for how — and this summary fills in.", icon="briefcase")
+        return _join([empty, _sales_section(rg, sales)])          # sold everything: the sales still show
     rate = nw["fx_rate"]
     fs = funds_summary
     attention = []
@@ -241,6 +245,7 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
                        title="Not counted today:")] if attention else []
 
     # ---- totals row
+    realized = ((sales or {}).get("totals") or {}).get("total_gain_kes")
     usd_line = f"≈ ${nw['total_usd']:,.0f} USD" if nw["total_usd"] is not None else None
     gain_sub = (f'{money(nw["gain"], sign=True)} ({pct(nw["gain_pct"])}) vs. KES {nw["cost"]:,.0f} you put in'
                 if nw["cost"] else None)
@@ -254,7 +259,9 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
                sub=f'{nw["ups"]} up · {nw["downs"]} down · bonds don\'t move daily'),
         ui.kpi("Total gain", money(nw["gain"], sign=True), tone=tone(nw["gain"]), private=True, term="gain-loss",
                delta_html=ui.delta(nw["gain_pct"], fmt="{:+.1f}%") if nw["gain_pct"] is not None else None,
-               sub=f"vs. KES {nw['cost']:,.0f} you put in" if nw["cost"] else None),
+               sub=" · ".join(x for x in (
+                   f"vs. KES {nw['cost']:,.0f} you put in" if nw["cost"] else None,
+                   f"{money(realized, sign=True)} locked in by sales" if realized is not None else None) if x) or None),
     ]
     if nw["has_bonds"]:
         nxt = (bond_portfolio.get("upcoming_12m") or [None])[0]
@@ -390,9 +397,14 @@ def _summary_tab(rg, nw, *, portfolio_summary, bond_portfolio, intl_portfolio_su
                         + str(_worth_knowing_card(nw, portfolio_summary, intl_portfolio_summary, fs))
                         + "</div>"))
 
-    # ---- everything you own
+    # ---- everything you own, then what you've sold
     parts.append(_everything_table(rg, nw, portfolio_summary, bond_portfolio, intl_portfolio_summary,
                                    nse_history, intl_history, fundamentals, fs))
+    try:
+        parts.append(_sales_section(rg, sales))
+    except Exception as e:                           # noqa: BLE001 — logged, never fatal
+        import logging
+        logging.getLogger(__name__).error(f"Your sales section skipped: {type(e).__name__}: {e}")
     parts.append(Markup('<p class="footnote">Information, not financial advice — each tab has the full note on '
                         'where its figures come from. These files are never committed to git.</p>'))
     return _join(parts)
@@ -522,6 +534,145 @@ def _after_inflation(inf):
                       sub="Your money compared with what it can buy — the result that matters when prices keep rising.")
 
 
+_SOLD_UNIT = {"nse": "shares", "intl": "shares", "bond": "face value", "fund": "units"}
+
+
+def _sales_rows(rg, items, *, show_part=True):
+    """The sales table: the profit or loss right after what was sold (the
+    figure that matters most), then the details behind it."""
+    rows = []
+    for it in items:
+        cur, kind = it["currency"], it["kind"]
+        d = dt.date.fromisoformat(it["date"])
+        part = KIND_WORD[kind] if show_part else ""
+        if kind in ("nse", "intl"):
+            what = _sym_cell(rg, {"symbol": it["code"], "name": part}, international=kind == "intl", name=bool(part))
+        else:
+            label = escape(it["name"] if kind == "fund" else it["code"])
+            inner = f'<span>{label}' + (f'<small>{escape(part)}</small>' if part else "") + "</span>"
+            link = ui.href(it.get("report_file") or "") if kind == "fund" else ""
+            what = Markup(f'<a class="sym" href="{link}">{inner}</a>' if link else f'<span class="sym">{inner}</span>')
+        if kind == "bond":
+            sold, price = money(it["quantity"], d=2), f'{it["sell_price"]:g}%'
+        elif kind == "fund":
+            sold, price = f'{it["quantity"]:,.3f} units', money(it["sell_price"], cur, d=4)
+        else:
+            sold, price = f'{qty(it["quantity"])} shares', money(it["sell_price"], cur, d=2)
+        left = it.get("left_after") or 0.0
+        kept = (money(left, d=2) if kind == "bond" else f"{left:,.3f}" if kind == "fund" else qty(left))
+        sold_html = Markup(f'{escape(sold)}<small>{"all of it" if left <= 1e-6 else "kept " + str(escape(kept))}'
+                           '</small>')
+        kes = (lambda v: Markup(f'<small>{escape(money(v))}</small>') if (cur != "KES" and v is not None) else "")
+        received = Markup(f'{escape(money(it["proceeds"], cur, d=2))}{kes(it.get("proceeds_kes"))}')
+        avg = it.get("avg_cost")
+        cost = Markup(f'{escape(money(it["cost"], cur, d=2))}'
+                      + (f'<small>avg {escape(money(avg, cur, d=4 if kind == "fund" else 2))}</small>'
+                         if avg and kind != "bond" else ""))
+        notes = []
+        if kind == "bond":
+            if it.get("accrued"):
+                notes.append(f'incl. {money(it["accrued"], d=2)} accrued interest paid by the buyer')
+            if it.get("coupons_received"):
+                notes.append(f'it also paid you {money(it["coupons_received"], d=2)} in coupons while you held it '
+                             '(after tax)')
+            if it.get("principal_received"):
+                notes.append(f'{money(it["principal_received"], d=2)} was repaid before the sale')
+        if it.get("fees"):
+            notes.append(f'fees {money(it["fees"], cur, d=2)}')
+        if it.get("estimated"):
+            notes.append("estimated at the dealing day's price — confirm it from your statement")
+        if it.get("note"):
+            notes.append(it["note"])
+        g = it["total_gain"]
+        gain = Markup(f'{escape(money(g, cur, d=2, sign=True))}<small>{escape(pct(it.get("gain_pct")))}'
+                      + (f' · {escape(money(it.get("total_gain_kes"), sign=True))}' if cur != "KES"
+                         and it.get("total_gain_kes") is not None else "") + "</small>")
+        rows.append([ui.cell(f"{d:%d %b %Y}", sort=it["date"]), ui.cell(what, sort=it["name"]),
+                     ui.cell(gain, sort=it.get("total_gain_kes") if it.get("total_gain_kes") is not None else g,
+                             tone=tone(g), cls="private"),
+                     ui.cell(sold_html, sort=it["quantity"], cls="private"), ui.cell(price, sort=it["sell_price"]),
+                     ui.cell(received, sort=it.get("proceeds_kes") or it["proceeds"], cls="private"),
+                     ui.cell(cost, sort=it["cost"], cls="private"),
+                     ui.cell("; ".join(notes) or "—", cls="small muted")])
+    cols = [ui.Col("Sold on", sort="text"), ui.Col("Holding", sort="text"),
+            ui.Col("Profit / loss", sort="number", term="realized-gain"), ui.Col("Sold", sort="number"),
+            ui.Col("Price", sort="number"), ui.Col("Received", sort="number"),
+            ui.Col("Cost", sort="number", term="average-cost"), ui.Col("Notes")]
+    return cols, rows
+
+
+KIND_WORD = {"nse": "Kenyan", "intl": "International", "bond": "Bond", "fund": "Fund"}
+
+
+def _sales_section(rg, sold):
+    """What you've sold and what each sale made or lost — Summary tab, #sales."""
+    if not sold:
+        return None
+    t = sold["totals"]
+    items = sold["items"]
+    gain_kes = t.get("total_gain_kes")
+    kpis = [
+        ui.kpi("Profit from sales", money(gain_kes, sign=True) if gain_kes is not None else "—", tone=tone(gain_kes),
+               private=True, term="realized-gain", big=True,
+               sub="locked in — what you sold for, minus what it cost you"
+               + (f" · your bonds also paid {money(t['bond_interest_kes'])} in coupons before you sold"
+                  if t.get("bond_interest_kes") else "")),
+        ui.kpi("Money received", money(t.get("proceeds_kes")), private=True,
+               sub="from every sale, after fees" + (" (US-dollar sales at that month's rate)"
+                                                     if any(it["currency"] != "KES" for it in items) else "")),
+        ui.kpi("Sales", str(t["count"]), sub=f'{t["wins"]} at a profit · {t["losses"]} at a loss'),
+        ui.kpi(f"Profit from sales in {t['year']}", money(t.get("year_total_gain_kes"), sign=True)
+               if t.get("year_total_gain_kes") is not None else "—", tone=tone(t.get("year_total_gain_kes")),
+               private=True, sub=f"sales dated {t['year']}"),
+    ]
+    parts = [ui.kpi_row(kpis, cls="kpis-summary")]
+    if t.get("unconverted"):
+        parts.append(ui.banner(f"{t['unconverted']} US-dollar sale(s) couldn't be put in shillings this run (no "
+                               "USD/KES rate) — left out of the KES totals above, shown in dollars below.", tone="warn"))
+    if len(items) >= 2:
+        bars = sc.hbars([{"label": it["name"], "sub": f' · {dt.date.fromisoformat(it["date"]):%d %b %Y}',
+                          "value": it["total_gain_kes"] if it["total_gain_kes"] is not None else it["total_gain"]}
+                         for it in items[:12]], title="Profit or loss on each sale (KES)", fmt=sc.Fmt("KES ", 0),
+                        diverging=True)
+        parts.append(Markup(f'<div class="private">{bars}</div>'))
+    cols, rows = _sales_rows(rg, items)
+    parts.append(ui.table(cols, rows, table_id="t-sales", show_first=10, cls="sales-table"))
+    parts.append(Markup(
+        '<p class="footnote">How a sale is counted: what it brought in after fees, minus what those shares, units or '
+        'bonds cost you at your <b>average cost</b> — the same average cost shown for what you still hold, which a '
+        'sale doesn\'t change. A bond\'s result includes the accrued interest the buyer paid you and any instalments '
+        'already repaid; the coupons it paid while you held it are noted beside it. US-dollar amounts are also shown '
+        'in shillings at the Central Bank\'s average rate for the month of the sale. Whether tax applies to a gain depends on what you sold — '
+        'this is information, not tax advice. Record a sale with the <b>Record a sale</b> button (dashboard app), '
+        '<code>./venv/bin/python3 sell.py</code>, or a row in <code>portfolio/sales.csv</code> (a fund\'s sales: '
+        '<code>fund_transactions.csv</code>).</p>'))
+    return ui.section(_join(parts), title="Your sales — profits and losses you've locked in", sec_id="sales",
+                      icon="check", term="realized-gain",
+                      sub="Everything you've sold, newest first. Your holdings everywhere else are what you still own.")
+
+
+def _locked_in(sold, kind):
+    """[(date, profit)] of one part's sales, in its own currency — for the look-backs."""
+    return [(it["date"], it["total_gain"]) for it in (sold or {}).get("items", []) if it["kind"] == kind]
+
+
+def _sold_fold(rg, sold, kind):
+    """A tab's own sales, folded under its holdings (the full list is on Summary › Your sales)."""
+    items = [it for it in (sold or {}).get("items", []) if it["kind"] == kind]
+    if not items:
+        return ""
+    b = sold["by_kind"][kind]
+    cols, rows = _sales_rows(rg, items, show_part=False)
+    g = b["total_gain"]
+    line = Markup(f'<p class="sold-line">{"Profit" if g >= 0 else "Loss"} from these sales: <b class="private num" '
+                  f'data-tone="{tone(g) or "flat"}">{escape(money(g, b["currency"], d=2, sign=True))}</b>'
+                  + (" — including the accrued interest the buyer paid" if kind == "bond" else "")
+                  + ' · all your sales, in shillings: <a href="#sales">Summary › Your sales</a></p>')
+    return ui.details(f"Sold — {b['count']} sale{'s' if b['count'] != 1 else ''}",
+                      _join([line, ui.table(cols, rows, table_id=f"t-sales-{kind}", cls="sales-table")]),
+                      det_id=f"sold-{kind}")
+
+
 def _moves_card(rg, nw, ps, ips, fs=None):
     """Today's biggest moves in shillings (quantity × today's change)."""
     rate = nw["fx_rate"]
@@ -562,7 +713,7 @@ def coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today, fs=Non
         if h.get("next_topup"):
             events.append((h["next_topup"], f"{h['name']} top-up", f"${h['monthly_amount']:,.0f}", "funds"))
         ex = (h.get("facts") or {}).get("next_ex_date") or h.get("next_payout_est")
-        if ex and h.get("payouts") in ("reinvest", "cash") and h.get("last_payout"):
+        if ex and h.get("payouts") in ("reinvest", "cash") and h.get("last_payout") and not h.get("sold_out"):
             word = "payout, reinvested" if h["payouts"] == "reinvest" else "payout to you"
             est = "" if (h.get("facts") or {}).get("next_ex_date") else " (≈ date)"
             events.append((ex, f"{h['name']} {word}{est}",
@@ -753,7 +904,7 @@ def _everything_table(rg, nw, ps, bp, ips, nse_history, intl_history, fundamenta
 
 
 # ------------------------------------------------------------------ Kenyan stocks tab
-def _kenyan_tab(rg, ps, *, history_rows, tracker, nse_history):
+def _kenyan_tab(rg, ps, *, history_rows, tracker, nse_history, realized=None):
     if not ps:
         return Markup(
             '<a id="stocks-top"></a>'
@@ -818,7 +969,8 @@ def _kenyan_tab(rg, ps, *, history_rows, tracker, nse_history):
                  + (f" — tracking since {first} ({days} day(s) recorded so far)." if first else ".")
                  + " A window shows \"not enough history yet\" rather than a guess when there isn't a real "
                    "snapshot that far back.")
-        parts.append(ui.section(_lookbacks(tracker, t["market_value"], "KES"), title="Performance Over Time",
+        parts.append(ui.section(_lookbacks(tracker, t["market_value"], "KES", t.get("cost_basis"), realized),
+                                title="Performance Over Time",
                                 sub=intro, icon="trend-up", term="lookback"))
 
     # ---- charts
@@ -1222,7 +1374,7 @@ def _stacked_years(years, by_year):
 
 
 # ------------------------------------------------------------------ International tab
-def _intl_tab(rg, ips, *, history_rows, tracker, intl_history):
+def _intl_tab(rg, ips, *, history_rows, tracker, intl_history, realized=None):
     if not ips:
         return Markup(
             '<a id="intl-top"></a>'
@@ -1286,7 +1438,8 @@ def _intl_tab(rg, ips, *, history_rows, tracker, intl_history):
                         'annualized dividend yield on your cost — an indicative estimate, not a record of dividends '
                         'actually received.</p>'))
     if tracker is not None:
-        parts.append(ui.section(_lookbacks(tracker, t["market_value"], "USD"), title="Performance Over Time",
+        parts.append(ui.section(_lookbacks(tracker, t["market_value"], "USD", t.get("cost_basis"), realized),
+                                title="Performance Over Time",
                                 sub="Computed from real snapshots recorded each day you run this tool.",
                                 icon="trend-up", term="lookback"))
 
@@ -1460,8 +1613,8 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
           portfolio_history=None, portfolio_news=None, portfolio_history_tracker=None,
           intl_portfolio_history=None, intl_portfolio_news=None, intl_portfolio_history_tracker=None,
           fundamentals=None, intl_fundamentals=None, nse_history=None, intl_history=None, today=None,
-          funds_summary=None, inflation=None):
-    """The whole My Portfolio page body (Markup)."""
+          funds_summary=None, inflation=None, sales=None):
+    """The whole My Portfolio page body (Markup). `sales`: sales.summarise()."""
     import page_funds
     today = today or dt.date.today()
     nw = networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary, usd_kes, funds_summary)
@@ -1471,30 +1624,40 @@ def build(rg, *, portfolio_summary=None, bond_portfolio=None, intl_portfolio_sum
     head = Markup(
         '<div class="banner no-app-only" data-tone="info" role="note">➕ <b>Recording a purchase is easiest with the '
         'dashboard app:</b> double-click <b>Open Dashboard.command</b> in the project folder (or run '
-        '<code>./venv/bin/python3 app.py</code>) and this page gets a <b>Record a purchase</b> form — search for the '
-        'stock, type what you paid, done. You can still add rows to the CSV files described below.</div>'
+        '<code>./venv/bin/python3 app.py</code>) and this page gets <b>Record a purchase</b> and <b>Record a sale</b> '
+        'forms — pick the holding, type the price, done. You can still add rows to the CSV files described below, '
+        'or record a sale with <code>./venv/bin/python3 sell.py</code>.</div>'
         '<div class="page-actions app-only">'
         '<button type="button" class="icon-btn primary" data-toggle-panel="purchase-panel" aria-expanded="false">'
         f'{ui.icon_svg("plus")}<span>Record a purchase</span></button>'
+        '<button type="button" class="icon-btn" data-toggle-panel="sale-panel" aria-expanded="false">'
+        f'{ui.icon_svg("coins")}<span>Record a sale</span></button>'
         '<button type="button" class="icon-btn" data-toggle-panel="entries-panel" aria-expanded="false">'
         f'{ui.icon_svg("news")}<span>Your entries</span></button></div>'
         '<div id="purchase-panel" class="section app-only toggle-panel card card-pad" hidden></div>'
+        '<div id="sale-panel" class="section app-only toggle-panel card card-pad" hidden></div>'
         '<div id="entries-panel" class="section app-only toggle-panel card card-pad" hidden></div>')
     tabs = ui.tabs("portfolio", [
         ("summary", "Summary", _summary_tab(rg, nw, portfolio_summary=ps, bond_portfolio=bp,
                                             intl_portfolio_summary=ips, fundamentals=fundamentals,
                                             intl_fundamentals=intl_fundamentals, nse_history=nse_history,
                                             intl_history=intl_history, today=today, funds_summary=fs,
-                                            inflation=inflation), None),
-        ("kenyan", "Kenyan stocks", _kenyan_tab(rg, ps, history_rows=portfolio_history,
-                                                tracker=portfolio_history_tracker, nse_history=nse_history),
+                                            inflation=inflation, sales=sales), None),
+        ("kenyan", "Kenyan stocks", _join([_kenyan_tab(rg, ps, history_rows=portfolio_history,
+                                                       tracker=portfolio_history_tracker, nse_history=nse_history,
+                                                       realized=_locked_in(sales, "nse")),
+                                           _sold_fold(rg, sales, "nse")]),
          len(ps["holdings"]) if ps else None),
-        ("bonds", "Bonds", _bonds_tab(rg, bp), len(bp["bonds"]) if bp else None),
-        ("international", "International", _intl_tab(rg, ips, history_rows=intl_portfolio_history,
-                                                     tracker=intl_portfolio_history_tracker,
-                                                     intl_history=intl_history),
+        ("bonds", "Bonds", _join([_bonds_tab(rg, bp), _sold_fold(rg, sales, "bond")]),
+         len(bp["bonds"]) if bp else None),
+        ("international", "International", _join([_intl_tab(rg, ips, history_rows=intl_portfolio_history,
+                                                            tracker=intl_portfolio_history_tracker,
+                                                            intl_history=intl_history,
+                                                            realized=_locked_in(sales, "intl")),
+                                                  _sold_fold(rg, sales, "intl")]),
          len(ips["holdings"]) if ips else None),
-        ("funds", "Funds", _safe_funds_tab(page_funds, rg, fs, today), len(fs["funds"]) if fs else None),
+        ("funds", "Funds", _join([_safe_funds_tab(page_funds, rg, fs, today), _sold_fold(rg, sales, "fund")]),
+         len(fs["funds"]) if fs else None),
         ("news", "News", _news_tab(ps, ips, portfolio_news or [], intl_portfolio_news or [], fs),
          (n_news + sum(len(h.get("news") or []) for h in (fs or {}).get("funds", []))) or None),
     ], label="Portfolio sections")

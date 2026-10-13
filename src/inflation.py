@@ -172,10 +172,11 @@ def _monthly(start, end):
     return out or [start]
 
 
-def portfolio_real(ps, bp, ips, fs, macro, usd_kes, today=None):
-    """After inflation, part by part, for every holding whose dates are known.
-    Returns {"parts": {key: {...}}, "total": {...}, "notes": [...]} or None
-    without a price index."""
+def portfolio_real(ps, bp, ips, fs, macro, usd_kes, today=None, sales=None):
+    """After inflation, part by part, for every holding whose dates are known
+    — and every sale (`sales` from sales.apply(): what you paid, any income,
+    and what the sale brought in). Returns {"parts": {key: {...}}, "total":
+    {...}, ...} or None without a price index."""
     cpi = CPI((macro or {}).get("cpi") or [])
     if not cpi:
         return None
@@ -238,6 +239,19 @@ def portfolio_real(ps, bp, ips, fs, macro, usd_kes, today=None):
             if h.get("monthly_amount"):
                 p["assumed"].append(h["name"])
             (p["items"].append(dict(r, name=h["name"])) if r else p["too_early"].append(h["name"]))
+    # what you sold: worth nothing now — the money came back to you on the sale day
+    for kind, key, label in (("nse", "stocks", "Kenyan shares"), ("intl", "intl", "International shares"),
+                             ("bond", "bonds", "Bonds")):
+        for s in (sales or {}).get(kind) or []:
+            p = part(key, label)
+            desc = f'{s["code"]} · sold {s["quantity"]:g} on {s["date"]}'
+            if s.get("undated"):
+                p["undated"].append(desc)
+                continue
+            r = real_result(s["flows"], 0.0, cpi, today, fx=fx, currency=s["currency"], fx_now=rate_now)
+            if kind == "bond" and s.get("purchase_date_assumed"):
+                p["assumed"].append(s["code"])
+            (p["items"].append(dict(r, name=desc)) if r else p["too_early"].append(desc))
     for p in parts.values():
         p["result"] = combine(p["items"])
     total = combine([p["result"] for p in parts.values()])

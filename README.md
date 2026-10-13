@@ -19,9 +19,10 @@ A fully automated daily stock analysis pipeline for the **Nairobi Securities Exc
 - **Kenya's inflation (Market Pulse)** — the latest 12-month rate against the Central Bank's 2.5–7.5% band, month by month since 2005 (with the 91-day T-bill rate and the Central Bank Rate alongside), year by year, what's getting more expensive (the 13 spending groups, core vs non-core, everyday prices like maize flour and petrol), the real T-bill rate, the shilling against the dollar, and what inflation does to savings — from the Central Bank of Kenya, KNBS and the IMF's price index, cross-checked month by month
 - **After inflation** — on My Portfolio: whether your investments have really grown since you bought them, once prices are taken into account (each purchase moved to today's shillings with Kenya's consumer price index, US-dollar amounts at the rate of the day), plus this year's race against inflation (T-bills, your bonds' yield, your funds) that needs no dates
 - **Your own private portfolio** — NSE stocks, Treasury/Infrastructure bonds, US-listed stocks and mutual funds, tracked in KES and USD, entered from a simple spreadsheet (CSV) and never committed to git — see [`portfolio/README.md`](portfolio/README.md)
+- **💰 Sales** — record selling some or all of any holding (shares, bonds or funds) in a few clicks: pick it from what you own, type how much (or press *Sell all*) and the price. You see the profit or loss before saving; your holdings then show what's left at the same average cost, and **Your sales** lists every sale's locked-in profit or loss (for a bond, including the accrued interest the buyer pays, with the coupons it paid you shown beside it). A sale of more than you held is refused — see [Recording a sale](#recording-a-sale)
 - **🏦 Mutual funds** — funds you hold through your bank, priced every run at the fund's published price per unit (from the fund manager's own data where it can be read directly, otherwise the Financial Times' fund data) and checked day by day against a second source. Your value, gain and today's move; profit by day, week and month; returns over every period and calendar year with payouts included (reconciled with the managers' published figures); payouts and payout yield; what each fund holds; how it compares with its competitors; news. Monthly top-ups and payouts are recorded automatically — exactly once each — with the bank's sales charge taken off, and you confirm the units when your statement arrives — see [Mutual funds](#-mutual-funds)
 - **⭐ Watchlist — NSE and international** — follow any Nairobi stock or any stock Yahoo Finance lists (US, London, Johannesburg, …) on its own page: a chart with *your* buy/sell prices drawn in, a plain-English signal checklist (trend, momentum, valuation, analysts, dividend), "needs your attention" alerts, key dates and news — see [Watchlist](#-watchlist)
-- **Click-to-add dashboard app** — double-click `Open Dashboard.command`: search for a stock by name, add it to your watchlist, record a purchase, fix a mistake, update the data — no files to edit, no commands to type
+- **Click-to-add dashboard app** — double-click `Open Dashboard.command`: search for a stock by name, add it to your watchlist, record a purchase or a sale, fix a mistake, update the data — no files to edit, no commands to type
 - **Excel export** — multi-sheet workbook with all data
 - **Clean runs** — old reports and cache files are automatically removed each run
 
@@ -59,7 +60,7 @@ cp .env.example .env
 
 ### 3. Run
 
-**The easy way (recommended): double-click `Open Dashboard.command`** in this folder (Finder). A Terminal window opens, the dashboard opens in your browser at `http://127.0.0.1:8765`, and if the data isn't from today it updates itself in the background. Every page then has a **🔄 Update** button, the ⭐ Watchlist page has a search box, and 💼 My Portfolio has a **Record a purchase** form. Keep that Terminal window open while you use the dashboard; close it to stop. (From a terminal it's `./venv/bin/python3 app.py`.)
+**The easy way (recommended): double-click `Open Dashboard.command`** in this folder (Finder). A Terminal window opens, the dashboard opens in your browser at `http://127.0.0.1:8765`, and if the data isn't from today it updates itself in the background. Every page then has a **🔄 Update** button, the ⭐ Watchlist page has a search box, and 💼 My Portfolio has **Record a purchase** and **Record a sale** forms. Keep that Terminal window open while you use the dashboard; close it to stop. (From a terminal it's `./venv/bin/python3 app.py`.)
 
 **Or the classic way**, which builds every page (plus PDFs and Excel) and opens it from disk, without the click-to-add buttons:
 
@@ -99,6 +100,21 @@ cp portfolio/holdings.example.csv portfolio/holdings.csv   # then edit it in Exc
 ```
 
 There are separate templates for US-listed stocks (`international_holdings.example.csv`, USD), Kenya bonds (`bonds.example.csv`) and mutual funds (`funds.example.csv`, USD). Your real files are gitignored and kept out of Docker images automatically. Full guide — columns, accepted formats, saving from Excel/Numbers/Sheets, switching from the older JSON files: [`portfolio/README.md`](portfolio/README.md).
+
+### Recording a sale
+
+**Easiest:** in the dashboard app, **💼 My Portfolio → 💰 Record a sale**: choose *Kenyan stock*, *International stock*, *Bond* or *Fund*, pick the holding from the list of what you own, type how many (or press **Sell all**) and the price you sold at, then **Review → Save**. The review shows the sale in words — what it brought in, your profit or loss against your average cost, and what you'll still hold — and nothing is saved until you confirm. Sold the wrong amount? **📝 Your entries → Sales → Remove** (with **Undo**).
+
+From a terminal, `sell.py` asks step by step — or takes it in one line:
+
+```bash
+./venv/bin/python3 sell.py                                      # asks: what, which, how much (Enter = all), price, date
+./venv/bin/python3 sell.py nse EQTY 200 52.50 --fees 85         # part of a holding
+./venv/bin/python3 sell.py intl AAPL all 214.10                 # all of it
+./venv/bin/python3 sell.py list                                 # what you hold and what you've sold
+```
+
+Sales are saved in your private `portfolio/sales.csv` (a fund's in `fund_transactions.csv`); your purchase rows stay as they are. How a sale is counted, and the bond and fund details: [`portfolio/README.md`](portfolio/README.md#sales--salescsv).
 
 ### 🏦 Mutual funds
 
@@ -419,9 +435,10 @@ kenyan_stock_analyzer/
 ├── docker_scheduled_run.py     # Docker's scheduled job: market-closed check + full pipeline
 ├── run.sh                      # One-command runner, bare metal (venv + pipeline + open dashboard)
 ├── Open Dashboard.command      # Double-click (macOS) to open the dashboard with click-to-add
-├── app.py                      # The local dashboard app (search, watchlist, record a purchase, 🔄 Update)
+├── app.py                      # The local dashboard app (search, watchlist, record a purchase or sale, 🔄 Update)
 ├── app_assets/                 # manage.js / manage.css — the app's in-page controls
 ├── add_holding.py / add_bond.py / add_international_holding.py   # Optional terminal helpers: append a purchase to your portfolio CSV (or JSON)
+├── sell.py                     # Terminal helper: record a sale (asks step by step, or in one line)
 ├── scheduler.py                # Optional scheduler for automated daily runs
 ├── .github/workflows/          # GitHub Actions — daily-summary.yml (scheduled email)
 ├── Dockerfile                  # Multi-stage image: Python app + supercronic scheduler
@@ -451,6 +468,7 @@ kenyan_stock_analyzer/
 │   ├── fund_data.py            # Fund prices, payouts and facts by ISIN (fund managers + FT)
 │   ├── inflation_data.py       # Kenya's inflation, price index, T-bill / CBR and USD/KES history
 │   ├── inflation.py            # "After inflation": your holdings in today's shillings
+│   ├── sales.py                # Your sales: what's left after them, and each one's profit or loss
 │   ├── page_stock.py           # Every stock's own page (NSE and international)
 │   ├── ui_theme.py             # The page shell shared by every page (+ ui_theme.css, ui_runtime.js)
 │   ├── ui_kit.py               # Small building blocks: headline figures, tabs, tables, ⓘ buttons…

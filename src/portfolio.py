@@ -420,13 +420,19 @@ class PortfolioHistoryTracker:
         """Rows sorted oldest -> newest."""
         return sorted(self._load_raw(), key=lambda r: r["date"])
 
-    def lookback(self, today_value, days_ago, tolerance_days=4):
+    def lookback(self, today_value, days_ago, tolerance_days=4, today_cost=None, realized=None):
         """
         Compare today_value (live, computed just now) against the closest
         recorded snapshot at or before (today - days_ago). Returns
         {from_date, from_value, pct_change} or None if no snapshot exists
         within [target - tolerance_days, target] — i.e. we genuinely don't
         have history that far back yet, so we say nothing rather than guess.
+
+        With today_cost (and the snapshot's cost), money you added or took out
+        in between doesn't count as performance: the change is how much the
+        gain moved — (value − cost) now minus then — plus the profit or loss
+        locked in by sales since (`realized`: [(date, gain)]). Buying more is
+        not a gain; selling is not a loss.
         """
         rows = self.load_history()
         if not rows:
@@ -443,16 +449,20 @@ class PortfolioHistoryTracker:
                 continue
             if window_start <= rd <= target:
                 if best is None or rd > best[0]:
-                    best = (rd, r["market_value"])
+                    best = (rd, r["market_value"], r.get("cost_basis"))
         if best is None or not best[1]:
             return None
-        from_date, from_value = best
-        pct = (today_value - from_value) / from_value * 100.0
+        from_date, from_value, from_cost = best
+        change = today_value - from_value
+        if today_cost is not None and from_cost is not None:
+            locked_in = sum(g for d, g in (realized or ()) if from_date.isoformat() < str(d)[:10] <= today.isoformat())
+            change = (today_value - today_cost) - (from_value - from_cost) + locked_in
+        pct = change / from_value * 100.0
         return {
             "from_date": from_date.isoformat(),
             "from_value": round(from_value, 2),
             "to_value": round(today_value, 2),
-            "change_value": round(today_value - from_value, 2),
+            "change_value": round(change, 2),
             "pct_change": round(pct, 2),
         }
 

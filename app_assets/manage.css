@@ -20,7 +20,7 @@
 .header .ma-pill-btn { background: rgba(255,255,255,0.14); color: #fff; border: 1px solid rgba(255,255,255,0.28); }
 
 /* ---- panels & forms ---- */
-#wl-add-panel h2, #purchase-panel h2 { margin-bottom: 8px; }
+#wl-add-panel h2, #purchase-panel h2, #sale-panel h2 { margin-bottom: 8px; }
 .ma-help { color: var(--text-muted, #64748b); font-size: 0.88rem; margin: 0 0 12px; line-height: 1.5; }
 .ma-hint { color: var(--text-muted, #64748b); font-size: 0.78rem; }
 .ma-muted { color: var(--text-muted, #64748b); }
@@ -40,6 +40,13 @@ select.ma-input { cursor: pointer; }
 .ma-btn-danger, .wl-btn-danger { color: var(--down, #b91c1c); }
 .ma-btn-danger:hover, .wl-btn-danger:hover { border-color: var(--down, #dc2626); color: var(--down, #b91c1c); }
 .ma-btn-small, .wl-btn { padding: 4px 11px; font-size: 0.8rem; min-height: 32px; }
+.ma-qty { display: flex; gap: 8px; align-items: center; }
+.ma-qty .ma-input { flex: 1; min-width: 0; }
+.ma-qty .ma-chip-btn { margin: 0; white-space: nowrap; min-height: 34px; padding: 4px 13px; font-weight: 650; }
+.ma-chip-btn.active { background: var(--accent, #2563eb); color: var(--accent-contrast, #fff); }
+.ma-input:disabled { opacity: 0.75; cursor: not-allowed; }
+.ma-preview { margin-top: 6px; font-size: 0.9rem; line-height: 1.5; font-variant-numeric: tabular-nums; }
+.ma-preview:empty { display: none; }
 .ma-chip-btn { font: inherit; font-size: 0.82rem; border: 1px solid transparent; background: var(--accent-soft, #eff6ff); color: var(--accent, #1e40af); border-radius: 999px; padding: 3px 11px; cursor: pointer; margin: 4px 4px 0 0; }
 .ma-error { color: var(--down, #b91c1c); font-size: 0.88rem; margin-top: 6px; line-height: 1.45; }
 .ma-error:empty { display: none; }

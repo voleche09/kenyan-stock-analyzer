@@ -102,6 +102,7 @@ TYPES = {"topup": "topup", "top-up": "topup", "top_up": "topup", "monthly": "top
          "payout": "payout", "dividend": "payout", "distribution": "payout"}
 STATUSES = ("pending", "estimated", "confirmed")
 UNIT_DP = 3                    # banks report units to 3 decimals
+SOLD_OUT = 0.0005              # fewer units than this left = the whole fund was sold
 
 
 # ------------------------------------------------------------------ small helpers
@@ -271,6 +272,8 @@ def _units_held_before(fund, txns, day):
     for t in txns:
         if _date(t["date"]) >= day:
             break
+        if _date(t["date"]) <= _date(fund["as_of"]):      # already in the statement's units
+            continue
         if t["type"] in ("topup", "buy", "reinvest"):
             if t.get("units") is None:
                 return None
@@ -278,6 +281,24 @@ def _units_held_before(fund, txns, day):
         elif t["type"] == "sell" and t.get("units") is not None:
             units -= t["units"]
     return units
+
+
+def _sold_out_since(fund, txns):
+    """The date you sold the whole fund, if you hold none now and haven't
+    bought since — no automatic top-ups after it. None otherwise."""
+    units, out = fund["units"], None
+    for t in sorted(txns, key=lambda t: _date(t["date"])):
+        if _date(t["date"]) <= _date(fund["as_of"]):
+            continue
+        if t["type"] in ("topup", "buy", "reinvest"):
+            units += t.get("units") or 0.0
+            if t["type"] != "reinvest":
+                out = None
+        elif t["type"] == "sell" and t.get("units"):
+            units -= t["units"]
+            if units <= SOLD_OUT:
+                out = _date(t["date"])
+    return out
 
 
 def sync_transactions(portfolio_dir, funds, market, today=None):
@@ -296,6 +317,21 @@ def sync_transactions(portfolio_dir, funds, market, today=None):
 
     # 1. price rows that were waiting for their dealing day's price
     for line, t in load_transactions(portfolio_dir):
+        if t["type"] == "sell" and t.get("amount") is None and t.get("units"):
+            # a sale typed as units only: the cash is units × the dealing day's price
+            hit = nav_on_or_after((market.get(t["isin"]) or {}).get("navs") or [], t["date"])
+            if not hit:
+                continue
+            cash = round(t["units"] * hit[1], 2)
+            try:
+                backup()
+                pcsv.update_row(path, TXN_FIELDS, line, expect={"date": t["date"], "units": t["units"]},
+                                changes={"amount": cash, "price": hit[1], "status": "estimated"}, backup=False)
+                changes.append(f"priced the {t['date']} sale for {t['isin']}: {t['units']} units at {hit[1]} = "
+                               f"{cash} ({hit[0].isoformat()} price)")
+            except (pcsv.RowChangedError, pcsv.CsvFormatError, OSError) as e:
+                logger.warning(f"Funds: couldn't update {TXN_FILE} line {line} ({e}) — will try again next run")
+            continue
         if t["status"] != "pending" or t["type"] not in ("topup", "buy", "reinvest") or t.get("amount") is None:
             continue
         navs = (market.get(t["isin"]) or {}).get("navs") or []
@@ -319,15 +355,16 @@ def sync_transactions(portfolio_dir, funds, market, today=None):
             pcsv.create_csv(path, TXN_FIELDS)
         pcsv.append_row(path, TXN_FIELDS, values)
 
-    # 2. top-ups that are due
+    # 2. top-ups that are due (none after you sold the whole fund, until you buy again)
     have = {(t["isin"], t["ref"]) for _l, t in load_transactions(portfolio_dir) if t["ref"]}
     for f in funds:
         if not f["monthly_amount"]:
             continue
         navs = (market.get(f["isin"]) or {}).get("navs") or []
+        closed = _sold_out_since(f, [t for _l, t in load_transactions(portfolio_dir) if t["isin"] == f["isin"]])
         for d in topup_dates(f["monthly_day"], f["as_of"], today):
             ref = f"topup:{d:%Y-%m}"
-            if (f["isin"], ref) in have:
+            if (f["isin"], ref) in have or (closed and d > closed):
                 continue
             hit = nav_on_or_after(navs, d)
             row = {"date": d.isoformat(), "isin": f["isin"], "type": "topup", "amount": f["monthly_amount"],
@@ -359,27 +396,37 @@ def sync_transactions(portfolio_dir, funds, market, today=None):
             held = _units_held_before(f, txns, ex)
             if held is None:          # an earlier top-up isn't priced yet — the entitled units aren't known
                 continue
-            cash = round(held * dist["amount"], 2)
+            sold_out = held <= SOLD_OUT                  # sold before it went ex — nothing to pay
+            if sold_out and (f["isin"], ref) not in have:
+                continue
+            cash = 0.0 if sold_out else round(held * dist["amount"], 2)
             hit = nav_on_or_after(navs, ex)
             provisional = " — amount provisional (last published payout), corrected automatically" \
                 if dist.get("provisional") else ""
-            what = (f"{dist['amount']} per unit × {held} units"
+            what = ("none held on the ex-date (sold before it), so nothing was paid" if sold_out else
+                    f"{dist['amount']} per unit × {held} units"
                     + (", reinvested" if f["payouts"] == "reinvest" else
                        (f", paid {_date(dist['pay_date']).isoformat()}" if dist.get("pay_date") else "")) + provisional)
             if (f["isin"], ref) in have:
-                # a provisional payout whose real amount is now published: fix the row (never a confirmed one)
+                # An automatic row whose amount is out of date — the real payout is now published, or a sale
+                # recorded since changed the units you held on the ex-date: fix it (never a confirmed row).
                 for line, t in load_transactions(portfolio_dir):
-                    if (t["isin"], t["ref"]) != (f["isin"], ref) or t["status"] != "estimated" \
-                            or "provisional" not in (t.get("note") or "") or dist.get("provisional") \
-                            or abs((t.get("amount") or 0) - cash) < 0.005:
+                    if (t["isin"], t["ref"]) != (f["isin"], ref) or t["status"] not in ("estimated", "pending"):
                         continue
+                    if abs((t.get("amount") or 0) - cash) < 0.005:
+                        continue                         # already right
+                    if dist.get("provisional") and "provisional" not in (t.get("note") or "") and not sold_out:
+                        continue                         # never swap a published amount for a provisional one
                     upd = {"amount": cash, "note": what}
-                    if t["type"] == "reinvest" and hit:
-                        upd.update(units=_units_for(cash, 0.0, hit[1]), price=hit[1])
+                    if t["type"] == "reinvest" and (hit or sold_out):
+                        upd.update(units=0.0 if sold_out else _units_for(cash, 0.0, hit[1]),
+                                   price=hit[1] if hit else None, status="estimated")
                     try:
                         backup()
                         pcsv.update_row(path, TXN_FIELDS, line, expect={"ref": ref}, changes=upd, backup=False)
-                        changes.append(f"corrected the {ex:%d %b %Y} payout for {f['isin']} to the published amount")
+                        changes.append(f"corrected the {ex:%d %b %Y} payout for {f['isin']} "
+                                       + ("— nothing was held by then" if sold_out else f"to {cash}"))
+                        txns = [t for _l, t in load_transactions(portfolio_dir) if t["isin"] == f["isin"]]
                     except (pcsv.RowChangedError, pcsv.CsvFormatError, OSError) as e:
                         logger.warning(f"Funds: couldn't update {TXN_FILE} line {line} ({e})")
                 continue
@@ -564,9 +611,15 @@ def _position(fund, txns, navs, dists):
     pending, payouts, reinvested, topups, sold = [], 0.0, 0.0, 0.0, 0.0
     deals = []                       # (dealing date, units change, cash paid in, is a reinvested payout)
     flows = []                       # your own cash in / out, for the money-weighted return
+    sales = []                       # one dict per sale, for "Your sales"
+    put_in_steps = []                # (date, money in at cost after that day's rows)
     for t in txns:
         amt, u, kind = t.get("amount") or 0.0, t.get("units"), t["type"]
         d = _date(t["date"])
+        if kind == "sell" and u and t.get("amount") is None:
+            # not priced yet: the dealing day's price when published, else the latest one (an estimate)
+            hit = nav_on_or_after(navs, d) or nav_on_or_before(navs, d)
+            amt = u * hit[1] if hit else 0.0
         if kind in ("topup", "buy"):
             invested += amt
             if kind == "topup":
@@ -588,14 +641,23 @@ def _position(fund, txns, navs, dists):
             if amt:
                 flows.append((d, amt))
         elif kind == "sell" and u:
-            avg = invested / units if units else 0.0
+            waiting = sum(p[2] for p in pending)     # purchases not priced yet have money in but no units
+            avg = (invested - waiting) / units if units > SOLD_OUT else 0.0
             invested -= avg * u
             units -= u
+            if units <= SOLD_OUT:                    # sold it all: no rounding crumbs left behind
+                units, invested = 0.0, waiting
             sold += amt
             realized += amt - avg * u
             deals.append((dealing(d), -u, -amt, False))
             if amt:
                 flows.append((d, amt))
+            sales.append({"date": d.isoformat(), "units": u, "proceeds": amt, "cost": avg * u,
+                          "gain": amt - avg * u, "gain_pct": (amt - avg * u) / (avg * u) * 100.0 if avg * u else None,
+                          "avg_cost": avg, "price": t.get("price") or amt / u, "left_after": units,
+                          "estimated": t.get("amount") is None or t.get("status") != "confirmed",
+                          "fees": 0.0})
+        put_in_steps.append((d, invested))
 
     # Profit day by day = the units held coming into the day × (today's price
     # + any payout going ex today − the previous price), plus what a purchase
@@ -614,6 +676,8 @@ def _position(fund, txns, navs, dists):
         daily.append((d, pl))
 
     # Value and money put in, day by day since the statement date.
+    # "Put in" is the cost of what's still held, so a sale lowers it by the
+    # average cost of the units sold (the same figure the gain is measured from).
     as_of = _date(fund["as_of"])
     start_cost = fund["units"] * fund["avg_cost"]
     series = []
@@ -622,12 +686,11 @@ def _position(fund, txns, navs, dists):
             continue
         held = fund["units"] + sum(x[1] for x in deals if x[0] <= d)
         cash = sum(p[1] for p in pending if p[0] <= d)
-        put_in = start_cost + sum(t.get("amount") or 0.0 for t in txns
-                                  if t["type"] in ("topup", "buy") and _date(t["date"]) <= d)
-        series.append((d, held * nav + cash, put_in))
+        put_in = next((v for sd, v in reversed(put_in_steps) if sd <= d), start_cost)
+        series.append((d, max(held, 0.0) * nav + cash, put_in))
     return {"units": units, "invested": invested, "realized": realized, "pending": pending, "payouts": payouts,
             "reinvested": reinvested, "topups": topups, "sold": sold, "daily": daily, "flows": flows,
-            "series": series}
+            "series": series, "sales": sales}
 
 
 def _sum_since(daily, start):
@@ -707,7 +770,8 @@ def compute_fund_portfolio(funds, txns, market, usd_kes=None, today=None):
         start = f.get("statement_nav") or (nav_on_or_before(navs, f["as_of"]) or (None, f["avg_cost"]))[1]
         flows = [(_date(f["as_of"]), -f["units"] * start)] + pos["flows"] + [(nav_d, value)]
         tracked_days = (nav_d - _date(f["as_of"])).days
-        nxt = next_topup(f["monthly_day"], today) if f["monthly_amount"] else None
+        sold_out = pos["units"] <= SOLD_OUT and not pos["pending"]
+        nxt = next_topup(f["monthly_day"], today) if f["monthly_amount"] and not sold_out else None
         last_ex = max((_date(d["ex_date"]) for d in dists), default=None)
         # A monthly payer's next ex-date ≈ the same point of next month (an estimate, labelled as one).
         next_ex = None
@@ -725,6 +789,7 @@ def compute_fund_portfolio(funds, txns, market, usd_kes=None, today=None):
             market_value=value, pending_value=pending_net, pending=pos["pending"],
             gain=gain, gain_pct=gain / pos["invested"] * 100.0 if pos["invested"] else None,
             payouts_received=pos["payouts"], reinvested=pos["reinvested"], realized=pos["realized"],
+            sales=pos["sales"], sold_out=sold_out,
             total_return_value=gain + pos["payouts"] + pos["realized"],
             day_change_value=day_pl,
             day_change_pct=(day_pl / (value - day_pl) * 100.0) if day_pl is not None and value - day_pl else None,
@@ -765,8 +830,9 @@ def compute_fund_portfolio(funds, txns, market, usd_kes=None, today=None):
         "day_change_value": day_v, "day_change_pct": (day_v / (mv - day_v) * 100.0) if day_v and mv - day_v else
         (0.0 if day_v == 0 else None),
         "payouts_received": sum(h["payouts_received"] for h in avail),
+        "realized": sum(h["realized"] for h in avail),
         "est_annual_income": sum(income) if income else None,
-        "monthly_topups": sum(h["monthly_amount"] or 0.0 for h in out),
+        "monthly_topups": sum(h["monthly_amount"] or 0.0 for h in out if not h.get("sold_out")),
         "n_funds": len(out), "n_available": len(avail), "fx_available": bool(rate),
     }
     for k in ("market_value", "invested", "gain", "day_change_value", "payouts_received", "est_annual_income"):
