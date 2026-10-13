@@ -9,10 +9,13 @@ git; you can also edit both in a spreadsheet — see portfolio/README.md).
                         [--payouts reinvest|cash|none] [--monthly AMOUNT --day DAY] [--fee PCT]
                         [--peers ISIN;ISIN] [--url FUND_PAGE_URL]
 
-  Record a one-off purchase or sale (leave --units out and the dashboard
-  works them out from that day's price after the fund's sales charge):
+  Record a one-off purchase (leave --units out and the dashboard works them
+  out from that day's price after the fund's sales charge):
     python3 fund.py buy ISIN AMOUNT [--units UNITS] [--date YYYY-MM-DD]
-    python3 fund.py sell ISIN UNITS [--amount CASH] [--date YYYY-MM-DD]
+
+  Record a sale — some units or "all" (leave --amount out and the dashboard
+  works it out from that day's price; sell.py asks step by step):
+    python3 fund.py sell ISIN UNITS|all [--amount CASH] [--date YYYY-MM-DD]
 
   Your statement arrived — copy its units into an automatic top-up / payout:
     python3 fund.py confirm ISIN REF UNITS        (REF as listed, e.g. topup:2026-03)
@@ -58,6 +61,10 @@ def _positive(s):
     return v
 
 
+def _units_or_all(s):
+    return "all" if str(s).strip().lower() == "all" else _positive(s)
+
+
 def _isin(s):
     s = s.strip().upper()
     if not fp.valid_isin(s):
@@ -98,17 +105,31 @@ def cmd_add(a, folder):
     print(f"✓ Added {a.name} ({a.units:g} units) to {fp.FUNDS_FILE}. Run ./run.sh to see it in My Portfolio → Funds.")
 
 
-def cmd_buy(a, folder, sell=False):
+def cmd_buy(a, folder):
     if not any(f["isin"] == a.isin for f in fp.load_funds(folder)):
         sys.exit(f"{a.isin} isn't in funds.csv yet — add it first with: fund.py add …")
-    row = {"date": a.date, "isin": a.isin, "type": "sell" if sell else "buy",
+    row = {"date": a.date, "isin": a.isin, "type": "buy",
            "amount": a.amount, "units": a.units, "status": "confirmed" if a.units else "pending",
-           "note": "added with fund.py"}
-    if not sell:
-        row["fee_pct"] = next(f["fee_pct"] for f in fp.load_funds(folder) if f["isin"] == a.isin)
+           "note": "added with fund.py",
+           "fee_pct": next(f["fee_pct"] for f in fp.load_funds(folder) if f["isin"] == a.isin)}
     _append(os.path.join(folder, fp.TXN_FILE), fp.TXN_FIELDS, row)
-    print(f"✓ Recorded a {'sale' if sell else 'purchase'} on {a.date}"
+    print(f"✓ Recorded a purchase on {a.date}"
           + ("" if a.units else " — its units will be worked out once that day's price is published"))
+
+
+def cmd_sell(a, folder):
+    """Checked first (no more than you held that day), then saved — the same
+    check the dashboard app and sell.py use."""
+    import sales
+    try:
+        row, summary, warnings = sales.check_fund_sale(folder, a.isin, a.units, a.date, amount=a.amount,
+                                                       note="added with fund.py", cache_dir=Config().cache_dir)
+    except sales.SaleError as e:
+        sys.exit(f"✗ {e}")
+    for w in warnings:
+        print(f"⚠️  {w}")
+    _append(os.path.join(folder, fp.TXN_FILE), fp.TXN_FIELDS, row)
+    print(f"✓ {summary}" + ("" if a.amount else " The amount is worked out once that day's price is published."))
 
 
 def cmd_confirm(a, folder):
@@ -192,7 +213,7 @@ def main():
         s = sub.add_parser(name, help=f"record a one-off {'sale' if sell else 'purchase'}")
         s.add_argument("isin", type=_isin)
         if sell:
-            s.add_argument("units", type=_positive)
+            s.add_argument("units", type=_units_or_all, help="units sold, or 'all'")
             s.add_argument("--amount", type=_positive)
         else:
             s.add_argument("amount", type=_positive)
@@ -211,8 +232,10 @@ def main():
     os.makedirs(folder, exist_ok=True)
     if a.cmd == "add":
         cmd_add(a, folder)
-    elif a.cmd in ("buy", "sell"):
-        cmd_buy(a, folder, sell=a.cmd == "sell")
+    elif a.cmd == "buy":
+        cmd_buy(a, folder)
+    elif a.cmd == "sell":
+        cmd_sell(a, folder)
     elif a.cmd == "confirm":
         cmd_confirm(a, folder)
     elif a.cmd == "since":

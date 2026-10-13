@@ -149,7 +149,8 @@ def main():
     portfolio_summary = None
     try:
         import portfolio as portfolio_mod
-        lots = portfolio_mod.load_holdings(config.portfolio_dir)
+        import sales as sales_mod
+        lots, _sold = sales_mod.apply(config.portfolio_dir, "nse", portfolio_mod.load_holdings(config.portfolio_dir))
         if lots:
             portfolio_summary = portfolio_mod.compute_portfolio(
                 lots, analysis_results, fundamentals_data, scores, validations,

@@ -59,14 +59,15 @@ def _short_company_name(name):
 def _holdings_by_symbol(config, preloaded):
     """{(market, symbol): {'quantity', 'avg_cost'}} from the private holdings files."""
     out = {}
-    sources = ((wl.MARKET_NSE, "portfolio", "nse_lots"),
-               (wl.MARKET_INTL, "international_portfolio", "intl_lots"))
-    for market, module_name, key in sources:
-        lots = preloaded.get(key)
+    sources = ((wl.MARKET_NSE, "portfolio", "nse_lots", "nse"),
+               (wl.MARKET_INTL, "international_portfolio", "intl_lots", "intl"))
+    for market, module_name, key, kind in sources:
+        lots = preloaded.get(key)        # main.py passes the lots still held after your sales
         if lots is None:
             try:
+                import sales
                 module = __import__(module_name)
-                lots = module.load_holdings(config.portfolio_dir)
+                lots, _sold = sales.apply(config.portfolio_dir, kind, module.load_holdings(config.portfolio_dir))
             except Exception as e:
                 logger.debug(f"Watchlist: couldn't read {module_name} holdings: {e}")
                 lots = []

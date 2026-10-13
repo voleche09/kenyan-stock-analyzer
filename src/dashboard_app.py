@@ -1,8 +1,8 @@
 """
 The dashboard app — a small local web server that makes the dashboard
 clickable: search for a stock and add it to your ⭐ watchlist, record a
-purchase, fix a mistake, and update the data — all from the browser, with no
-files to edit and no commands to type.
+purchase or a sale, fix a mistake, and update the data — all from the
+browser, with no files to edit and no commands to type.
 
     Double-click "Open Dashboard.command"   (or: ./venv/bin/python3 app.py)
 
@@ -10,11 +10,12 @@ What it does:
   - Serves the generated pages in reports/ at http://127.0.0.1:8765 and adds a
     small JSON API that the pages' manage.js uses (search, add, remove, ...).
   - Writes ONLY your private files in portfolio/ (watchlist.csv, holdings.csv,
-    international_holdings.csv, bonds.csv) — through the same CSV code the
-    command-line helpers use, with a backup copy before anything is removed.
+    international_holdings.csv, bonds.csv, sales.csv, and a fund's sales in
+    fund_transactions.csv) — through the same CSV code the command-line
+    helpers use, with a backup copy before anything is removed.
   - Runs the pipeline (main.py) in the background to update the pages: a
     quick watchlist-only rebuild after a watchlist change, a full update after
-    you record a purchase or click 🔄 Update. A full update is built in a
+    you record a purchase or a sale, or click 🔄 Update. A full update is built in a
     separate folder and only swapped in when it has finished, so the pages
     you're looking at never disappear halfway and a failed update changes
     nothing.
@@ -54,6 +55,7 @@ import urllib.request
 import webbrowser
 
 import portfolio_csv
+import sales
 import symbol_lookup
 import watchlist as wl
 from logger import get_logger
@@ -372,7 +374,7 @@ def _fmt_qty(q):
     return f"{q:,.0f}" if float(q).is_integer() else f"{q:,.6g}"
 
 
-def check_purchase(kind, body, cache_dir, today=None, lookup=symbol_lookup):
+def check_purchase(kind, body, cache_dir, today=None, lookup=symbol_lookup, portfolio_dir=None):
     """
     Validate one purchase. -> (values for add_lot/add_bond, summary line, [warnings]).
     Raises ApiError (400 bad input, 503 data source unreachable) with a
@@ -436,6 +438,9 @@ def check_purchase(kind, body, cache_dir, today=None, lookup=symbol_lookup):
                             f"ago — otherwise check the price (per share, not the total).")
     if kind == "nse" and not float(qty).is_integer():
         warnings.append("NSE shares are normally bought in whole numbers — check the number of shares.")
+    if not when and portfolio_dir and sales.has_sales(portfolio_dir, kind, symbol):
+        warnings.append(f"You've recorded a sale of {symbol}. A purchase without a date counts as bought before "
+                        "it — add the date you bought, so the sale's profit stays right.")
     total = qty * price
     summary = (f"{_fmt_qty(qty)} share{'s' if qty != 1 else ''} of {symbol}"
                + (f" ({name})" if name and name != symbol else "")
@@ -623,7 +628,8 @@ class DashboardApp:
         kind = body.get("kind")
         mod, csv_name, json_name, fields = _modules(kind)
         try:
-            values, summary, warnings = check_purchase(kind, body, self.cache_dir, lookup=self.lookup)
+            values, summary, warnings = check_purchase(kind, body, self.cache_dir, lookup=self.lookup,
+                                                       portfolio_dir=self.portfolio_dir)
         except ValueError as e:                  # e.g. a note that's too long
             raise ApiError(400, str(e))
         csv_path = os.path.join(self.portfolio_dir, csv_name)
@@ -666,6 +672,7 @@ class DashboardApp:
             raise ApiError(400, "Missing details of the entry to remove — reload the page and try again.")
         expect = {k: v for k, v in expect.items() if k in {f.name for f in fields}}
         with self.lock:
+            self._keep_sales_possible(kind, expect)
             try:
                 removed = portfolio_csv.remove_row(csv_path, fields, line, expect=expect)
             except portfolio_csv.RowChangedError as e:
@@ -676,6 +683,135 @@ class DashboardApp:
         what = removed.get("symbol") or removed.get("issue")
         return {"ok": True, "removed": removed, "message": f"Removed that {what} entry from {csv_name}. "
                                                           f"(A backup copy was saved in portfolio/backups/.)"}
+
+    def _keep_sales_possible(self, kind, expect):
+        """Refuse to remove a purchase that a recorded sale needs (the sale
+        would then sell more than you held) — remove the sale first."""
+        skind = "bond" if kind == "bonds" else kind
+        lots = sales.lots_for(self.portfolio_dir, skind)
+        keys = (("issue", "face_value", "purchase_price_pct", "purchase_date") if skind == "bond"
+                else ("symbol", "quantity", "buy_price", "buy_date"))
+        want = dict(expect)
+        if skind == "bond":                   # the file's blank price means par; issue typos are mapped
+            want["purchase_price_pct"] = want.get("purchase_price_pct") or 100.0
+            want["issue"] = sales._canon("bond", want.get("issue"))
+        same = (lambda lot: all(portfolio_csv._same(lot.get(k), want.get(k)) for k in keys if k in want))
+        i = next((i for i, lot in enumerate(lots) if same(lot)), None)
+        if i is None:
+            return
+        broken = sales.new_problems(skind, lots, [s for _l, s in sales.load_sales(self.portfolio_dir)],
+                                    lots_after=lots[:i] + lots[i + 1:])
+        if broken:
+            raise ApiError(409, "A sale you recorded needs this purchase — without it, " + broken[0].split(": ", 1)[-1]
+                           + ". Remove that sale first (it's in Your entries), then this purchase.")
+
+    # ---- sales ----
+    def positions(self, kind):
+        """What you can sell: each holding you have now, after your sales."""
+        kind = sales.KINDS.get((kind or "").lower())
+        try:
+            if kind == "fund":
+                held = sales.fund_positions(self.portfolio_dir, self.cache_dir)
+                return {"kind": kind, "positions": [
+                    dict(p, code=isin, quantity=p["units"]) for isin, p in held.items() if p["units"] > 0.0005]}
+            if kind not in ("nse", "intl", "bond"):
+                raise ApiError(400, "Choose what you sold: a Kenyan stock, an international stock, a bond or a fund.")
+            held = sales.positions(self.portfolio_dir, kind)
+        except ValueError as e:
+            raise ApiError(500, f"Your holdings couldn't be read: {e}")
+        out = []
+        for code, p in sorted(held.items()):
+            row = dict(p, code=code, currency=sales.CURRENCY[kind])
+            if kind == "bond":
+                import bonds_portfolio as B
+                ref = B.BOND_REFERENCE.get(code) or {}
+                row.update(maturity_date=ref.get("maturity_date"), coupon_pct=ref.get("coupon_pct"))
+            out.append(row)
+        return {"kind": kind, "positions": out}
+
+    def sales_list(self):
+        """Your recorded sales (sales.csv + the funds' sell rows), for Your entries."""
+        import funds_portfolio as fp
+        rows = [dict(s) for _l, s in sales.load_sales(self.portfolio_dir)]
+        funds = {f["isin"]: f["name"] for f in fp.load_funds(self.portfolio_dir)}
+        fund_rows = [dict(t, line=line, name=funds.get(t["isin"], t["isin"]))
+                     for line, t in fp.load_transactions(self.portfolio_dir) if t["type"] == "sell"]
+        return {"file": sales.SALES_FILE, "entries": rows, "fund_file": fp.TXN_FILE, "fund_entries": fund_rows}
+
+    def sales_add(self, body):
+        kind = sales.KINDS.get(str(body.get("kind") or "").lower())
+        try:
+            if kind == "fund":
+                values, summary, warnings = sales.check_fund_sale(
+                    self.portfolio_dir, body.get("code"), body.get("quantity"), body.get("sale_date"),
+                    amount=body.get("amount"), note=wl.clean_note(body.get("note")), cache_dir=self.cache_dir)
+                if body.get("undo") and body.get("status") in ("pending", "estimated", "confirmed"):
+                    values["status"] = body["status"]
+                    values["price"] = body.get("price") or values.get("price")
+            else:
+                today_price = None
+                if kind in ("nse", "intl") and not body.get("undo"):
+                    try:
+                        market = wl.MARKET_NSE if kind == "nse" else wl.MARKET_INTL
+                        today_price = (self.lookup.quote(body.get("code"), market, self.cache_dir) or {}).get("price")
+                    except Exception:                    # the price check is a nicety — never blocks a sale
+                        today_price = None
+                values, summary, warnings = sales.check_sale(
+                    self.portfolio_dir, kind, body.get("code"), body.get("quantity"), body.get("sell_price"),
+                    body.get("sale_date"), fees=body.get("fees"), note=wl.clean_note(body.get("note")),
+                    today_price=today_price)
+        except ValueError as e:                  # SaleError, or a note that's too long
+            raise ApiError(400, str(e))
+        if body.get("dry_run"):
+            return {"ok": True, "dry_run": True, "summary": summary, "warnings": warnings}
+        with self.lock:
+            try:
+                # checked again under the lock: another tab may have saved a sale meanwhile
+                if kind == "fund":
+                    sales.check_fund_sale(self.portfolio_dir, values["isin"], values["units"], values["date"],
+                                          amount=values["amount"], cache_dir=self.cache_dir)
+                    dropped = sales.add_fund_sale(self.portfolio_dir, values)
+                else:
+                    sales.check_sale(self.portfolio_dir, kind, values["code"], values["quantity"],
+                                     values["sell_price"], values["date"], fees=values["fees"])
+                    dropped = sales.add_sale(self.portfolio_dir, values)
+            except ValueError as e:
+                raise ApiError(400, str(e))
+        self.jobs.request("full", delay=FULL_UPDATE_DELAY)
+        msg = "Saved: " + summary
+        if dropped:
+            msg += f" (Your file has no {', '.join(dropped)} column, so that wasn't saved.)"
+        return {"ok": True, "summary": summary, "warnings": warnings, "message": msg, "values": values}
+
+    def sales_remove(self, body):
+        import funds_portfolio as fp
+        is_fund = body.get("kind") == "fund"
+        fields = fp.TXN_FIELDS if is_fund else sales.SALE_FIELDS
+        name = fp.TXN_FILE if is_fund else sales.SALES_FILE
+        path = os.path.join(self.portfolio_dir, name)
+        try:
+            line = int(body.get("line"))
+        except (TypeError, ValueError):
+            raise ApiError(400, "Which sale? (missing line number) — reload the page and try again.")
+        expect = body.get("expect") or {}
+        need = ("date", "isin", "units") if is_fund else ("date", "code", "quantity")
+        if not isinstance(expect, dict) or not all(expect.get(k) not in (None, "") for k in need):
+            raise ApiError(400, "Missing details of the sale to remove — reload the page and try again.")
+        expect = {k: v for k, v in expect.items() if k in {f.name for f in fields} and k != "type"}
+        if not os.path.exists(path):
+            raise ApiError(409, f"{name} no longer exists — reload the page.")
+        with self.lock:
+            if is_fund and not any(ln == line and t["type"] == "sell" for ln, t in fp.load_transactions(self.portfolio_dir)):
+                raise ApiError(409, f"{name} line {line} isn't a sale (any more) — reload the page and try again.")
+            try:
+                removed = portfolio_csv.remove_row(path, fields, line, expect=expect)
+            except portfolio_csv.RowChangedError as e:
+                raise ApiError(409, str(e))
+            except ValueError as e:
+                raise ApiError(400, str(e))
+        self.jobs.request("full", delay=FULL_UPDATE_DELAY)
+        return {"ok": True, "removed": removed, "message": f"Removed that sale from {name}. "
+                                                          "(A backup copy was saved in portfolio/backups/.)"}
 
     def refresh(self, body):
         kind = body.get("kind") or "full"
@@ -853,6 +989,8 @@ def make_handler(app):
                 "/api/watchlist": app.watchlist_entries,
                 "/api/holdings": lambda: app.holdings(q("kind")),
                 "/api/bonds/issues": app.bond_issues,
+                "/api/positions": lambda: app.positions(q("kind")),
+                "/api/sales": app.sales_list,
             }
             post_routes = {
                 "/api/watchlist/add": app.watchlist_add,
@@ -860,6 +998,8 @@ def make_handler(app):
                 "/api/watchlist/update": app.watchlist_update,
                 "/api/holdings/add": app.holdings_add,
                 "/api/holdings/remove": app.holdings_remove,
+                "/api/sales/add": app.sales_add,
+                "/api/sales/remove": app.sales_remove,
                 "/api/refresh": app.refresh,
             }
             try:

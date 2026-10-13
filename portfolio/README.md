@@ -3,7 +3,8 @@
 This folder holds **your real stock, bond and international-stock
 holdings, and your ⭐ watchlist**. It is deliberately kept out of git: every
 real file in here (`*.csv` other than the `*.example.csv` templates — so
-`holdings.csv`, `international_holdings.csv`, `bonds.csv`, `watchlist.csv` —
+`holdings.csv`, `international_holdings.csv`, `bonds.csv`, `watchlist.csv`,
+`sales.csv`, `funds.csv`, `fund_transactions.csv` —
 plus `holdings.json`, `history.json`, `bonds.json`, `bonds_history.json`,
 `international_holdings.json`, `international_history.json` and the
 `backups/` folder) is listed in `.gitignore` — and in `.dockerignore`, for the
@@ -24,9 +25,16 @@ Double-click **`Open Dashboard.command`** in the project folder (or run
   typos (a price far from today's, a future date, part-shares on the NSE), and
   writes the row into the right file below — creating it with the proper
   header if it doesn't exist yet.
+- **💼 My Portfolio → 💰 Record a sale** — pick *Kenyan stock*,
+  *International stock*, *Bond* or *Fund*, choose the holding from the list of
+  what you own, type how much (or press **Sell all**) and the price, and click
+  **Review → Save**. Before saving it shows the sale in words — what it
+  brought in, your **profit or loss against your average cost**, and what you
+  still hold — and it refuses a sale of more than you held on that date. See
+  [Sales](#sales--salescsv) for how it's counted.
 - **📝 Your entries** (bottom of the same page) — every row of your files,
-  with **Remove** (and **Undo**). A copy of the file is saved in `backups/`
-  first (the newest 20 per file are kept).
+  purchases and sales, with **Remove** (and **Undo**). A copy of the file is
+  saved in `backups/` first (the newest 20 per file are kept).
 - **⭐ Watchlist → ➕ Add a stock** — search, pick, optionally set your buy /
   sell prices, **Add**. Edit or remove from each stock's card.
 
@@ -88,8 +96,9 @@ re-run — or let a helper script add the row for you
 | `watchlist.csv` | **No — private** | ⭐ Stocks you're watching (NSE or international) and your buy/sell prices | the stock's own currency |
 | `funds.csv` | **No — private** | 🏦 Mutual funds you hold, from your bank statement, and how each is run (payouts, monthly top-up, sales charge) | **USD** |
 | `fund_transactions.csv` | **No — private** | Everything after each fund's statement: top-ups and payouts (added by the dashboard, once each), purchases and sales | **USD** |
+| `sales.csv` | **No — private** | 💰 Shares and bonds you've sold — some or all of a holding | the holding's own currency |
 | `backups/` | **No — private** | Copies the dashboard app takes before it removes or edits a row | — |
-| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv`, `funds.example.csv`, `fund_transactions.example.csv` | Yes | Fake-data templates to copy from | — |
+| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv`, `funds.example.csv`, `fund_transactions.example.csv`, `sales.example.csv` | Yes | Fake-data templates to copy from | — |
 
 Each is a separate file because each asset class has its own currency and its
 own meaning for "price" — so a US stock priced in dollars can never be mixed
@@ -214,6 +223,62 @@ isin,name,units,avg_cost,as_of,statement_nav,payouts,monthly_amount,monthly_day,
 XS9000000018,Sample Global Bond Income Fund A (USD) Dist,400,9.80,2026-03-31,9.9120,reinvest,50,15,2
 ```
 
+### Sales — `sales.csv`
+
+When you sell some or all of a holding, keep its purchase rows as they are and
+add **one row per sale** here (the app's **💰 Record a sale** and `sell.py` do
+it for you). A fund's sales go in `fund_transactions.csv` instead (type `sell`)
+— the same three ways record them there.
+
+| Column | Required? | What to put |
+|---|---|---|
+| `date` | **Yes** | The day you sold. |
+| `kind` | **Yes** | `nse` (Kenyan shares), `intl` (international shares) or `bond`. |
+| `code` | **Yes** | The ticker (`EQTY`, `AAPL`) or the bond issue, exactly as in your purchases file. |
+| `quantity` | **Yes** | Shares sold — part of what you hold, or all of it. For a bond: the **face value** sold, as you bought it (KES). |
+| `sell_price` | **Yes** | The price per share (KES for `nse`, USD for `intl`). For a bond: the **clean price in % of face value**, e.g. `101.25`. |
+| `fees` | No | Brokerage and other charges, in the same currency. |
+| `note` | No | Anything you like. |
+
+```csv
+date,kind,code,quantity,sell_price,fees,note
+2026-05-04,nse,EQTY,200,52.50,85,sold half
+2026-06-12,intl,AAPL,2.5,214.10,,
+```
+
+**How a sale is counted — average cost.** The profit or loss on a sale is what
+it brought in (quantity × price − fees) minus what those shares cost you at
+your **average cost** — the same average cost My Portfolio shows. Every
+purchase made before the sale shrinks by the same share, so the average cost
+of what you still hold doesn't change. A purchase dated **after** a sale isn't
+touched by it; a purchase **without a date** counts as bought before any sale.
+
+**Bonds:** the buyer pays you the clean price plus the interest built up since
+the last coupon (accrued interest), so a bond sale's result is clean price +
+accrued interest + any instalments already repaid − fees − what you paid. On a
+bond that repays in parts, the clean price applies to what was still owed. The
+coupons the part you sold paid you while you held it (after withholding tax)
+are shown beside the sale, not mixed into it.
+
+**Funds:** units sold are taken out at the fund's average cost too. Leave the
+amount blank and the dashboard works it out from the fund's price on the
+dealing day (marked *estimated* until you copy the figure from your bank's
+confirmation). Selling all of a fund stops its automatic monthly top-ups; a
+payout that went ex after you sold is corrected to nothing.
+
+**What you'll see:** every holding everywhere shows what you **still** hold;
+**My Portfolio → Summary → Your sales** lists each sale with its profit or loss
+(US-dollar sales also in shillings, at the Central Bank's average rate for the
+month of the sale), each tab has its own **Sold** list, "Total gain" mentions
+the profit locked in, and **After inflation** counts what you sold, too.
+**Performance over time** (1 day / week / month / year) leaves out money you
+added or took out, so a sale never shows up as a fall in value.
+
+**Safety:** a sale of more than you held on its date is refused by the app and
+`sell.py`; a hand-typed row that doesn't add up is reported in the log (with
+its line number) and left out — never guessed. The app also won't let you
+remove a purchase that a recorded sale depends on (remove the sale first).
+
 ### Dates and "after inflation"
 
 My Portfolio's **After inflation** section shows whether each holding has
@@ -301,10 +366,12 @@ record it again correctly). It only removes the row if it still says what the
 page showed — if you changed the file in a spreadsheet meanwhile, it asks you
 to reload instead of guessing — and keeps a copy in `backups/` first.
 
-Or edit the row, or delete it, in your spreadsheet. If you've sold a stock
-entirely, delete all of its rows. (This is a holdings tracker, not a trade
-ledger — it shows what you currently hold and doesn't record realized gains
-from sales.)
+Or edit the row, or delete it, in your spreadsheet.
+
+**Sold something?** Don't delete its purchase rows — record the sale instead
+(**💰 Record a sale**, `sell.py`, or a row in `sales.csv`; see
+[Sales](#sales--salescsv)). The dashboard then shows what you still hold *and*
+the profit or loss you made. Deleting the purchases would lose that.
 
 ## Prefer the terminal? Helper scripts
 
@@ -327,7 +394,19 @@ virtual environment, from the project folder:
 ```
 
 (`add_holding.py SCOM 500 34.50` and `add_bond.py IFB1/2023/6.5 150000` work
-the same way; or run `source venv/bin/activate` first.) Running one with the
+the same way; or run `source venv/bin/activate` first.)
+
+**Recording a sale:** `./venv/bin/python3 sell.py` asks you step by step (what
+you sold, how much — Enter for all of it — the price and the date), shows the
+profit or loss, and saves only when you say yes. Or in one line:
+
+```bash
+./venv/bin/python3 sell.py nse EQTY 200 52.50 --date 2026-05-04 --fees 85
+```
+
+(`sell.py intl AAPL all 214.10`, `sell.py bond ISSUE 100000 101.25` and
+`sell.py fund ISIN all` work the same way; `sell.py list` shows what you hold
+and what you've sold.) Running one with the
 system `python3` gives `ModuleNotFoundError: No module named 'dotenv'` — the
 script now prints the exact command to use instead.
 

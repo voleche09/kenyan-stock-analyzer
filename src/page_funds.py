@@ -320,9 +320,11 @@ def _fund_card(h, i):
     f = h.get("facts") or {}
     link = ui.href(h.get("report_file") or "")
     tag = PAYOUT_WORDS.get(h.get("payouts") or ("none" if f.get("income_treatment") == "Accumulation" else ""), "")
+    if h.get("sold_out"):
+        tag = "Sold — you hold none"
     head = (f'<div class="fc-head"><div class="fc-name"><b>{escape(h["name"])}</b>'
             f'<small>{escape(f.get("category") or "")}{" · " if f.get("category") else ""}{escape(h["isin"])}</small></div>'
-            + (f'{ui.pill(tag, "info")}' if tag else "") + "</div>")
+            + (f'{ui.pill(tag, "warn" if h.get("sold_out") else "info")}' if tag else "") + "</div>")
     if not h.get("data_available"):
         body = '<p class="muted small">No price today — left out of the totals, not guessed.</p>'
         return Markup(f'<a class="fund-card" data-c="{_fund_color(i)}" href="{link}">{head}{body}</a>')
@@ -339,6 +341,10 @@ def _fund_card(h, i):
     rets = " ".join(f'<span>{escape(lab)} {chip(p.get(k), cap=15 if k != "1M" else 5)}</span>'
                     for k, lab in (("1Y", "1Y"), ("3Y", "3Y/yr"), ("5Y", "5Y/yr")) if k in p)
     foot = []
+    if h.get("sales"):
+        r = h.get("realized") or 0.0
+        foot.append(f'Sold {len(h["sales"])}×: <b class="private" data-tone="{tone(r) or "flat"}">'
+                    f'{escape(usd(r, 2, sign=True))}</b> {"profit" if r >= 0 else "loss"} locked in')
     if h.get("next_topup"):
         foot.append(f'Next top-up {escape(_when(h["next_topup"]))}: <b class="private">{escape(usd(h["monthly_amount"]))}</b>'
                     + (f' ≈ {h["next_topup_units_est"]:,.3f} units' if h.get("next_topup_units_est") else ""))
@@ -420,7 +426,7 @@ def _plan_section(funds, today):
     for i, h in enumerate(funds):
         f = h.get("facts") or {}
         ex = f.get("next_ex_date") or h.get("next_payout_est")
-        if ex and h.get("payouts") in ("reinvest", "cash") and h.get("last_payout"):
+        if ex and h.get("payouts") in ("reinvest", "cash") and h.get("last_payout") and not h.get("sold_out"):
             est = "" if f.get("next_ex_date") else " (estimated date)"
             amt = h["last_payout"]["amount"] * (h.get("units") or 0)
             events.append([ui.cell(_when(ex), sort=ex), ui.cell(_name_cell(h, i), sort=h["name"]),
@@ -851,7 +857,7 @@ def _your_money_tab(h, today):
                                   title="Month by month", sub="last 12 months")) + "</div>")
     value = _value_chart("c-fund-value", h.get("value_series"), title="Value since your statement")
     plan = []
-    if h.get("monthly_amount"):
+    if h.get("monthly_amount") and h.get("next_topup"):        # none after you sold the whole fund
         d = dt.date.fromisoformat(h["next_topup"])
         for _k in range(6):
             plan.append([ui.cell(_when(d), sort=d.isoformat()), ui.cell(usd(h["monthly_amount"]), cls="private"),

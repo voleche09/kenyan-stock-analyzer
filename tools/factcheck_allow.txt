@@ -37,6 +37,12 @@ sentence portfolio ^market value today \(kes #\)$
 # Chart image descriptions became chart titles.
 sentence portfolio ^(gain/loss by holding|bond allocation by face value|value sensitivity to market yield)$
 
+# Sales (2026-10): the "use the app" note now names both forms (Record a
+# purchase and Record a sale), and "Performance over time" is explained as
+# leaving out money added or taken out.
+sentence portfolio ^recording a purchase is easiest with the dashboard app:
+sentence portfolio ^how your portfolio's value compares with its value one day, one week
+
 # --- Watchlist --------------------------------------------------------------
 # Chart image descriptions ("SYMBOL price chart") became chart titles.
 sentence watchlist price chart$

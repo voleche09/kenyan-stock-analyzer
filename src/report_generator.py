@@ -899,7 +899,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                        intl_portfolio_summary=None, intl_portfolio_history=None,
                        intl_portfolio_news=None, intl_portfolio_history_tracker=None,
                        intl_report_files=None, intl_analysis_results=None, intl_fundamentals_data=None,
-                       watchlist_count=None, funds_summary=None):
+                       watchlist_count=None, funds_summary=None, sales=None):
         """
         Generate the main index.html dashboard — the single entry point.
 
@@ -908,6 +908,8 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
 
         Args:
             fundamentals_data: dict from FundamentalAnalysis.fetch_all_fundamentals().
+            sales: {"nse" | "intl" | "bond": [sale]} from sales.apply() — what
+                you've sold (a fund's sales come with funds_summary).
 
         Returns:
             str: Path to index.html.
@@ -1036,7 +1038,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             intl_portfolio_history_tracker=intl_portfolio_history_tracker,
             nse_results=analysis_results, fundamentals_data=fundamentals_data,
             intl_results=intl_analysis_results, intl_fundamentals=intl_fundamentals_data,
-            watchlist_count=watchlist_count, funds_summary=funds_summary,
+            watchlist_count=watchlist_count, funds_summary=funds_summary, sales=sales,
         )
         return index_path
 
@@ -1542,7 +1544,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                                intl_portfolio_history=None, intl_portfolio_news=None,
                                intl_portfolio_history_tracker=None, nse_results=None,
                                fundamentals_data=None, intl_results=None, intl_fundamentals=None,
-                               watchlist_count=None, funds_summary=None):
+                               watchlist_count=None, funds_summary=None, sales=None):
         """
         Build the multi-page dashboard: a clean Overview plus grouped detail
         pages (Technicals, Fundamentals, Dividends, Sectors, Data Quality).
@@ -1592,11 +1594,19 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             inflation_data=macro, tbill_pct=tbill_91)
         bonds_body = page_market.bonds(self, treasury)
 
+        # ---- your sales: every one, with its profit or loss (and in KES)
+        import sales as sales_mod
+        try:
+            sold = sales_mod.summarise(sales, funds_summary, macro, usd_kes)
+        except Exception as e:                       # never stops the dashboard
+            logger.error(f"Your sales section skipped: {type(e).__name__}: {e}")
+            sold = None
+
         # ---- after inflation: your holdings vs Kenya's consumer prices
         import inflation
         try:
             real = inflation.portfolio_real(portfolio_summary, bond_portfolio, intl_portfolio_summary, funds_summary,
-                                            macro, usd_kes)
+                                            macro, usd_kes, sales=sales)
             race = inflation.race(bond_portfolio, funds_summary, macro, tbill_91)
         except Exception as e:                       # never stops the dashboard
             logger.error(f"After-inflation figures skipped: {type(e).__name__}: {e}")
@@ -1628,7 +1638,7 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
             fundamentals=fundamentals_data, intl_fundamentals=intl_fundamentals,
             nse_history=last_closes(nse_results, portfolio_summary),
             intl_history=last_closes(intl_results, intl_portfolio_summary), funds_summary=funds_summary,
-            inflation={"macro": macro, "real": real, "race": race})
+            inflation={"macro": macro, "real": real, "race": race}, sales=sold)
 
         # ---- Assemble & write all pages (each shows its sidebar label as its title) ----
         pages = {

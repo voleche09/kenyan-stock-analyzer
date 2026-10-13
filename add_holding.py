@@ -92,7 +92,16 @@ def main():
 
     # Show the updated aggregate position for this symbol (best-effort — no
     # network call, just arithmetic over what's now in your holdings file).
-    agg = P._aggregate_lots([l for l in lots if l["symbol"] == symbol])[symbol]
+    import sales
+    if not buy_date and sales.has_sales(config.portfolio_dir, "nse", symbol):
+        print(f"  ⚠️  You've recorded a sale of {symbol}: a purchase without a date counts as bought before it. "
+              f"Add the date (buy_date in the file) so the sale's profit stays right.")
+    lots, _sold = sales.apply(config.portfolio_dir, "nse", lots)       # what's left after any sales
+    agg = P._aggregate_lots([l for l in lots if l["symbol"] == symbol]).get(symbol)
+    if agg is None:
+        print(f"  Note: your recorded sales of {symbol} use up this purchase too — check its date "
+              f"(a purchase without one counts as bought before every sale).")
+        return
     print(f"  Your {symbol} position is now: {agg['quantity']:g} shares, "
           f"weighted avg cost KES {agg['avg_cost']:.2f}, "
           f"total cost basis KES {agg['cost_basis']:,.2f} "

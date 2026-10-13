@@ -265,9 +265,14 @@ def main():
         portfolio_news = []
         portfolio_history_tracker = None
         lots = []
+        # Your sales (private — portfolio/sales.csv): each holding below is what's
+        # still held after them; the sales themselves are listed on My Portfolio.
+        sold = {"nse": [], "intl": [], "bond": []}
+        import sales as sales_mod
         try:
             import portfolio as portfolio_mod
-            lots = portfolio_mod.load_holdings(config.portfolio_dir)
+            lots, sold["nse"] = sales_mod.apply(config.portfolio_dir, "nse",
+                                                portfolio_mod.load_holdings(config.portfolio_dir))
             if lots:
                 logger.info(f"Portfolio: {len(lots)} lot(s) across "
                            f"{len({l['symbol'] for l in lots})} holding(s)")
@@ -294,7 +299,8 @@ def main():
         bond_portfolio = None
         try:
             import bonds_portfolio as bonds_mod
-            bond_lots = bonds_mod.load_bonds(config.portfolio_dir)
+            bond_lots, sold["bond"] = sales_mod.apply(config.portfolio_dir, "bond",
+                                                      bonds_mod.load_bonds(config.portfolio_dir))
             if bond_lots:
                 logger.info(f"Bonds: {len(bond_lots)} holding(s)")
                 bond_portfolio = bonds_mod.compute_bond_portfolio(bond_lots)
@@ -324,7 +330,8 @@ def main():
             import international_portfolio as intl_mod
             import international_data as intl_data
             from portfolio import PortfolioHistoryTracker
-            intl_lots = intl_mod.load_holdings(config.portfolio_dir)
+            intl_lots, sold["intl"] = sales_mod.apply(config.portfolio_dir, "intl",
+                                                      intl_mod.load_holdings(config.portfolio_dir))
             if intl_lots:
                 intl_symbols = sorted({l['symbol'] for l in intl_lots})
                 logger.info(f"International portfolio: {len(intl_lots)} lot(s) across "
@@ -498,6 +505,7 @@ def main():
             intl_fundamentals_data=intl_fundamentals_data,
             watchlist_count=watchlist_count(config.portfolio_dir),
             funds_summary=funds_summary,
+            sales=sold,
         )
 
         # ---- ⭐ Watchlist page (private — portfolio/watchlist.csv, gitignored) ----

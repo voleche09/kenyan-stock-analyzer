@@ -32,8 +32,9 @@ _TERMS = {
                    "bad event hurts everything at once."),
     "fx-rate": ("USD/KES rate", "How many Kenyan shillings one US dollar buys today. International holdings "
                 "are converted with this run's rate only — never an old or guessed one."),
-    "lookback": ("Performance over time", "How your portfolio's value compares with its value one day, one week, "
-                 "one month and one year ago, from the snapshots this dashboard saves each day you run it."),
+    "lookback": ("Performance over time", "How much your portfolio made or lost over the last day, week, month and "
+                 "year, from the snapshots this dashboard saves each day you run it. Money you added (a purchase) or "
+                 "took out (a sale) isn't counted as a gain or a loss — a sale's profit or loss is."),
     "est-dividend": ("Estimated yearly dividend", "Your number of shares multiplied by the most recent declared "
                      "dividend per share. Companies can change or skip dividends, so it is an estimate."),
     "yield-on-cost": ("Dividend yield on cost", "The yearly dividend as a percentage of what you paid, rather than "
@@ -218,6 +219,11 @@ _TERMS = {
     "profit-periods": ("Profit by day, week and month", "How much your units made or lost in US dollars: units held × "
                        "the change in price per unit, plus payouts. Top-ups are not profit, so they're left out, "
                        "and the sales charge counts as a small loss on the day it's taken."),
+    "realized-gain": ("Profit or loss on a sale", "What a sale brought in (after fees) minus what those shares, "
+                      "units or bonds cost you at your average cost. Unlike a gain on paper, it's locked in — the "
+                      "money is yours. What you still hold keeps the same average cost."),
+    "average-cost": ("Average cost", "What you paid per share (or unit) on average across all your purchases. A sale "
+                     "is measured against it, and doesn't change it for what's left."),
 }
 
 # Company figures — the stock pages' existing explanations, reused as-is.
