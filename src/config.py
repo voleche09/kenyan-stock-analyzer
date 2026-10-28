@@ -29,6 +29,8 @@ class Config:
             PROJECT_ROOT / os.getenv('CACHE_DIR', 'data')
         )
 
+        self.dividend_refresh_days = max(1, int(os.getenv("DIVIDEND_REFRESH_DAYS", "7")))
+
         # ---- Analysis parameters ----
         self.rsi_period = int(os.getenv('RSI_PERIOD', '14'))
         self.rsi_overbought = int(os.getenv('RSI_OVERBOUGHT', '70'))

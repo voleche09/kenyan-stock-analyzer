@@ -729,7 +729,8 @@ def coming_up_events(bp, ps, ips, fundamentals, intl_fundamentals, today, fs=Non
         for key, label in (("dividend_book_closure", "book closure"), ("dividend_payment_date", "dividend paid")):
             d = _upcoming(f.get(key), today) if f.get(key) else None
             if d:
-                amt = f"KES {f['dps_fy']:.2f}/share" if f.get("dps_fy") else ""
+                event_amount = f.get("dividend_amount")
+                amt = f"KES {event_amount:.2f}/share" if event_amount is not None else ""
                 events.append((d.isoformat(), f"{h['symbol']} {label}{tag}", amt, "stocks"))
         d = _upcoming(f.get("earnings_next_date"), today) if f.get("earnings_next_date") else None
         if d:
@@ -1067,9 +1068,9 @@ def _kenyan_tab(rg, ps, *, history_rows, tracker, nse_history, realized=None):
                      else '<span class="div-unverified">Unverified</span>')
         else:
             badge = '<span class="div-zero">0 — none declared</span>'
-        ex = h.get("dividend_ex_date")
+        ex = h.get("dividend_next_date")
         if ex:
-            ex_html = (f'<span class="exdate-upcoming">{escape(ex)} (upcoming)</span>' if h.get("dividend_ex_upcoming")
+            ex_html = (f'<span class="exdate-upcoming">{escape(ex)} (upcoming)</span>' if h.get("dividend_next_date_upcoming")
                        else f'<span class="exdate-past">{escape(ex)} (passed)</span>')
         else:
             ex_html = '<span class="exdate-none">—</span>'

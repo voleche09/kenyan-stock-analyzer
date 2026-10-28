@@ -232,9 +232,9 @@ def generate_alerts(symbol, analysis_result, fund, validation=None):
     if dy and dy >= 8 and (payout is None or payout <= 100):
         alerts.append(f"💰 High dividend yield ({dy:.1f}%)")
 
-    # Upcoming dividend ex-date
-    if fund.get("dividend_ex_date_is_upcoming") and fund.get("dividend_ex_date"):
-        alerts.append(f"📅 Ex-dividend {fund['dividend_ex_date']}")
+    # Upcoming dividend date (ex-dividend date when known, else book closure)
+    if fund.get("dividend_next_date_upcoming") and fund.get("dividend_next_date"):
+        alerts.append(f"📅 Dividend date {fund['dividend_next_date']}")
 
     # Illiquid warning
     vt = fund.get("value_traded")

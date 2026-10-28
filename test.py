@@ -971,7 +971,7 @@ class TestWatchlistSignals(unittest.TestCase):
     def test_attention_items(self):
         today = _dt.date(2026, 10, 5)
         fund = {"price_52w_high": 101, "price_52w_low": 50, "earnings_next_date": "2026-10-08",
-                "dividend_ex_date": "2026-10-15", "close": 100, "change_pct": 6.0}
+                "dividend_next_date": "2026-10-15", "close": 100, "change_pct": 6.0}
         view = watchlist_mod.build_entry_view({"symbol": "EQTY", "market": "NSE", "buy_below": 100},
                                               None, fund, today=today)
         texts = " | ".join(t for _, t in view["attention"])

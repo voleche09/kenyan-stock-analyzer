@@ -23,6 +23,8 @@ the two versions.
 """
 
 import base64
+import datetime as dt
+from urllib.parse import urlsplit
 import re
 from types import SimpleNamespace
 
@@ -467,23 +469,61 @@ def _score_kpi(c, tail):
                   sub=sub, tone=tone)
 
 
+def _dividend_kpi(f, currency="KES", today=None):
+    today = today or dt.date.today()
+    amount = _num(f.get("dividend_amount"))
+    currency = f.get("dividend_currency") or currency
+    kind = (f.get("dividend_type") or "Not confirmed").replace(" dividend", "").title()
+    status = f.get("dividend_declaration_status")
+    if status in ("recommended", "preliminary"):
+        kind += " (" + ("proposed" if status == "recommended" else "preliminary") + ")"
+    payment = None
+    try:
+        payment = dt.date.fromisoformat(f.get("dividend_payment_date"))
+    except (ValueError, TypeError):
+        pass
+    next_date = "Not confirmed"
+    if payment and payment >= today:
+        days = (payment - today).days
+        next_date = payment.strftime("%b %d, %Y") + (" · today" if not days else f" · in {days} days")
+        if status in ("recommended", "preliminary"):
+            next_date += " (" + ("proposed" if status == "recommended" else "preliminary") + ")"
+    yld = _num(f.get("dividend_yield"))
+    payout = _num(f.get("dividend_payout_ratio"))
+    rows = [("Type", kind), ("Next Dividend Date", next_date),
+            ("Dividend Amount", (f"{amount:.6f}".rstrip("0").rstrip(".") if amount is not None and amount < .1
+                                 else f"{amount:.2f}" if amount is not None else "Not confirmed")
+             + (f" {currency} per share" if amount is not None else "")),
+            ("Dividend Yield", f"{yld:.2f}%" if yld is not None else "Not available"),
+            ("Payout Ratio", f"{payout:.1f}%" if payout is not None else "Not available")]
+    parts = [f'<small><strong>{escape(label)}</strong><br>{escape(value)}</small>' for label, value in rows]
+    if payment and payment < today:
+        parts.append(f'<small>Previous scheduled payment: {payment:%b %d, %Y}</small>')
+    for key, label in (("dividend_book_closure", "Book closure"),
+                       ("dividend_record_date", "Record date"), ("dividend_ex_date", "Ex-dividend date")):
+        if f.get(key):
+            parts.append(f'<small>{label}: {escape(f[key])}</small>')
+    source = f.get("dividend_source") or "Market-data provider; declaration not verified"
+    url = f.get("dividend_source_url") or ""
+    if urlsplit(url).scheme in ("http", "https") and urlsplit(url).netloc:
+        parts.append(f'<small>Source: <a href="{escape(url)}" target="_blank" rel="noopener noreferrer">{escape(source)}</a></small>')
+    else:
+        parts.append(f'<small>Source: {escape(source)}</small>')
+    if f.get("dividend_verified_date"):
+        parts.append(f'<small>Issuer checked: {escape(f["dividend_verified_date"])}</small>')
+    if f.get("dividend_cache_stale"):
+        parts.append('<small>Refresh unavailable — showing saved declaration.</small>')
+    note = f.get("dividend_note") or ""
+    if note:
+        parts.append(f'<small>{escape(note)}</small>')
+    basis = f.get("dividend_yield_basis") or "Annual yield and payout ratio from the market-data provider"
+    return ui.kpi("Dividend", Markup("".join(parts)), term="ex-dividend",
+                  sub=basis + ". Payout ratio is the provider's annual/TTM metric, not verified by this declaration. "
+                      "Book closure/record date differs from ex-dividend date; payment date is the scheduled cash distribution.")
+
+
 def _nse_dividend_kpi(c):
-    f = c.f
-    dps = _num(f.get("dps_fy"))
-    parts = [f'<span class="div-pay">KES {dps:g}/share</span>' if dps and dps > 0
-             else '<span class="div-zero">0 — no dividend</span>']
-    if f.get("dividend_ex_date"):
-        if f.get("dividend_ex_date_is_upcoming"):
-            parts.append(f'<small>Ex-div: <span class="exdate-upcoming">{escape(f["dividend_ex_date"])} (upcoming)'
-                         '</span></small>')
-        else:
-            parts.append(f'<small>Ex-div: <span class="exdate-past">{escape(f["dividend_ex_date"])} (passed)'
-                         '</span></small>')
-    if f.get("earnings_next_date"):
-        parts.append(f'<small>Next earnings: {escape(f["earnings_next_date"])}</small>')
-    return ui.kpi("Dividend", Markup(" ".join(parts)), term="ex-dividend",
-                  sub="A green (upcoming) ex-date means you can still buy before it to receive the declared "
-                      "dividend. 0 means the company currently pays no dividend.")
+    return _dividend_kpi(c.f)
 
 
 def _checks_nse(c):
@@ -745,8 +785,8 @@ def _history_tab(c):
                          sort=_num(d.get("amount")))]
                 for d in reversed(list(c.dividend_history))]
         parts.append(ui.section(
-            Markup(f'<p class="section-desc">Real payments Yahoo Finance has on record for {escape(c.symbol)} — not '
-                   'a projection.</p>')
+            Markup(f'<p class="section-desc">Dividend events Yahoo Finance has on record for {escape(c.symbol)} — not '
+                   'a projection. Dates are ex-dividend dates, not payment dates.</p>')
             + ui.table([ui.Col("Date", sort="text"), ui.Col("Amount per Share", sort="number")], rows,
                        table_id="dividend-table"),
             title="Dividend History", sec_id="dividend-history", icon="coins"))
@@ -1048,20 +1088,9 @@ def _intl_verdicts(c, upside, close):
 
 def _checks_intl(c, earnings_calendar):
     f = c.f
-    rate = _num(f.get("dividend_rate"))
-    val = [f'<span class="div-pay">{escape(c.money(rate))}/share/yr</span>' if rate and rate > 0
-           else '<span class="div-zero">0 — no dividend</span>']
-    if f.get("ex_dividend_date"):
-        val.append(f'<small>Last ex-div: {escape(f["ex_dividend_date"])}</small>')
-    dates = (earnings_calendar or {}).get("Earnings Date")
-    if dates:
-        dates = [dates] if isinstance(dates, str) else list(dates)
-        val.append(f'<small>Next earnings: {escape(" or ".join(str(d) for d in dates))}</small>')
     tiles = [_score_kpi(c, "A transparent mechanical screen of public metrics — not investment advice. "
                            "The same engine used dashboard-wide."),
-             ui.kpi("Dividend", Markup(" ".join(val)), term="ex-dividend",
-                    sub="\"Ex-div\" is the most recent date the dividend was declared for; a new one is announced "
-                        "closer to the next payment.")]
+             _dividend_kpi(f, f.get("currency") or "USD")]
     lo, hi, close = _num(f.get("week52_low")), _num(f.get("week52_high")), _num(c.latest.get("close"))
     sub = None
     if lo and hi and close:
