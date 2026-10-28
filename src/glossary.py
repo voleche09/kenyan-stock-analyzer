@@ -219,6 +219,13 @@ _TERMS = {
     "profit-periods": ("Profit by day, week and month", "How much your units made or lost in US dollars: units held × "
                        "the change in price per unit, plus payouts. Top-ups are not profit, so they're left out, "
                        "and the sales charge counts as a small loss on the day it's taken."),
+    "net-deposits": ("Money you deposited", "Everything you've sent to your broker, minus anything you took out. "
+                     "It's the real amount of your own money in the account."),
+    "account-value": ("Account value", "The shares you hold at today's prices plus the cash waiting in the account — "
+                      "what the whole account is worth if you sold everything today."),
+    "account-growth": ("Growth on your deposits", "Account value minus the money you deposited. Unlike the gain on "
+                       "your holdings, it counts everything: profits from shares you sold, dividends, fees and today's "
+                       "prices."),
     "realized-gain": ("Profit or loss on a sale", "What a sale brought in (after fees) minus what those shares, "
                       "units or bonds cost you at your average cost. Unlike a gain on paper, it's locked in — the "
                       "money is yours. What you still hold keeps the same average cost."),

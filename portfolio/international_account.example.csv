@@ -1,0 +1,5 @@
+date,type,amount,note
+2025-03-01,deposit,1000,EXAMPLE - one row per transfer to your broker (USD)
+2025-09-15,deposit,500,or one row with your total deposits so far
+2026-01-10,withdrawal,200,money you took out
+2026-01-31,cash,25.40,uninvested cash on that date - copy it from your broker; the latest row counts

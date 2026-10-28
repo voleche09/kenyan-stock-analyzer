@@ -96,9 +96,10 @@ re-run — or let a helper script add the row for you
 | `watchlist.csv` | **No — private** | ⭐ Stocks you're watching (NSE or international) and your buy/sell prices | the stock's own currency |
 | `funds.csv` | **No — private** | 🏦 Mutual funds you hold, from your bank statement, and how each is run (payouts, monthly top-up, sales charge) | **USD** |
 | `fund_transactions.csv` | **No — private** | Everything after each fund's statement: top-ups and payouts (added by the dashboard, once each), purchases and sales | **USD** |
+| `international_account.csv` | **No — private** | 💵 Money you deposited to / withdrew from your international broker, and its cash balance | **USD** |
 | `sales.csv` | **No — private** | 💰 Shares and bonds you've sold — some or all of a holding | the holding's own currency |
 | `backups/` | **No — private** | Copies the dashboard app takes before it removes or edits a row | — |
-| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv`, `funds.example.csv`, `fund_transactions.example.csv`, `sales.example.csv` | Yes | Fake-data templates to copy from | — |
+| `holdings.example.csv`, `international_holdings.example.csv`, `bonds.example.csv`, `watchlist.example.csv`, `funds.example.csv`, `fund_transactions.example.csv`, `sales.example.csv`, `international_account.example.csv` | Yes | Fake-data templates to copy from | — |
 
 Each is a separate file because each asset class has its own currency and its
 own meaning for "price" — so a US stock priced in dollars can never be mixed
@@ -222,6 +223,33 @@ fund manager hasn't published yet uses the last published amount, marked
 isin,name,units,avg_cost,as_of,statement_nav,payouts,monthly_amount,monthly_day,fee_pct
 XS9000000018,Sample Global Bond Income Fund A (USD) Dist,400,9.80,2026-03-31,9.9120,reinvest,50,15,2
 ```
+
+### Your international account — `international_account.csv` (USD)
+
+The cost of the shares you hold today isn't the money you put in: sell at a
+profit, reinvest, and the new shares' cost includes that profit. To see how
+your **own money** has grown, record your deposits and cash here:
+
+| Column | Required? | What to put |
+|---|---|---|
+| `date` | **Yes** | The day of the transfer — or of the cash balance. |
+| `type` | **Yes** | `deposit` (money you sent to the broker), `withdrawal` (money you took out) or `cash` (uninvested cash in the account; the latest-dated row counts). |
+| `amount` | **Yes** | US dollars. |
+| `note` | No | Anything you like. |
+
+```csv
+date,type,amount,note
+2025-03-01,deposit,1000,
+2026-01-31,cash,25.40,from the broker's Balances page
+```
+
+One row per deposit is best; one row with your total so far works too.
+**My Portfolio → International** then starts with **Your account**: money you
+deposited, account value (shares at today's prices + cash), growth on your
+deposits, your cash — and where the growth came from (the paper gain or loss on
+what you hold now vs. what's already yours from sales, dividends and fees). The
+net worth counts the cash, and its "what you put in" uses your deposits for
+this part. Template: `international_account.example.csv`.
 
 ### Sales — `sales.csv`
 

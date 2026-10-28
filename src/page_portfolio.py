@@ -87,6 +87,13 @@ def networth_summary(portfolio_summary, bond_portfolio, intl_portfolio_summary=N
     intl = {"value_usd": it.get("market_value") or 0.0, "cost_usd": it.get("cost_basis") or 0.0,
             "gain_usd": it.get("gain") or 0.0, "day_pct": it.get("day_change_pct"),
             "day_value_usd": it.get("day_change_value"), "dividend_usd": it.get("est_annual_dividend") or 0.0}
+    # With the account file (broker_account.py): the cash counts too, and what you put in is the money
+    # you deposited — not the cost of today's shares, which includes profits reinvested from sales.
+    acct = (intl_portfolio_summary or {}).get("account") if has_intl else None
+    if acct:
+        intl["value_usd"] += acct["cash"] or 0.0
+        if acct["complete"]:
+            intl.update(cost_usd=acct["net_deposited"], gain_usd=intl["value_usd"] - acct["net_deposited"])
     if has_intl and rate:
         intl.update(value_kes=intl["value_usd"] * rate, cost_kes=intl["cost_usd"] * rate,
                     day_value_kes=(intl["day_value_usd"] * rate if intl["day_value_usd"] is not None else None),
@@ -1375,6 +1382,53 @@ def _stacked_years(years, by_year):
 
 
 # ------------------------------------------------------------------ International tab
+def _usd(v, sign=False, d=2):
+    return money(v, "USD", d=d, sign=sign)
+
+
+def _intl_account(a):
+    """Money in → what it's worth now: the international account as a whole
+    (broker_account.summarise), at the top of the International tab."""
+    since = dt.date.fromisoformat(a["first_date"]).strftime("%d %b %Y") if a.get("first_date") else None
+    dep_sub = " · ".join(x for x in (
+        f"since {since}" if since else None,
+        f"deposits {_usd(a['deposits'])} − withdrawals {_usd(a['withdrawals'])}" if a["withdrawals"] else None) if x)
+    cash_sub = (f"as of {dt.date.fromisoformat(a['cash_as_of']):%d %b %Y} — update it from your broker"
+                if a.get("cash_as_of") else "not recorded — add a cash row")
+    kpis = [ui.kpi("Money you deposited", _usd(a["net_deposited"]), big=True, private=True, term="net-deposits",
+                   sub=dep_sub or None),
+            ui.kpi("Account value", _usd(a["value"]), private=True, term="account-value",
+                   sub=f"shares {_usd(a['holdings_value'])} + cash {_usd(a['cash'] or 0.0)}")]
+    parts = []
+    if a["complete"]:
+        kpis.append(ui.kpi("Growth on your deposits", _usd(a["growth"], sign=True), tone=tone(a["growth"]),
+                           private=True, term="account-growth",
+                           delta_html=ui.delta(a["growth_pct"], fmt="{:+.1f}%") if a["growth_pct"] is not None else None,
+                           sub="account value − money deposited"))
+    else:
+        parts.append(ui.banner("⚠️ A holding had no price today, so the account value is missing it — growth on your "
+                               "deposits isn't shown rather than understated.", tone="warn"))
+    kpis.append(ui.kpi("Cash in the account", _usd(a["cash"] or 0.0), private=True, sub=cash_sub))
+    parts.insert(0, ui.kpi_row(kpis, cls="kpis-summary"))
+    if a["complete"]:
+        rest = (f'{escape(_usd(a["realized_recorded"], sign=True))} from the sales recorded here'
+                + (f' and <b class="private">{escape(_usd(a["other_unrecorded"], sign=True))}</b> from earlier sales '
+                   'not recorded here, dividends, interest and fees' if abs(a["other_unrecorded"]) >= 0.01 else ""))
+        parts.append(Markup(
+            f'<p class="sold-line">Where the growth came from: <b class="private" data-tone="{tone(a["unrealized"]) or "flat"}">'
+            f'{escape(_usd(a["unrealized"], sign=True))}</b> is the paper gain or loss on the shares you hold now; '
+            f'<b class="private" data-tone="{tone(a["other"]) or "flat"}">{escape(_usd(a["other"], sign=True))}</b> '
+            f'is already yours — <span class="private">{rest}</span>.</p>'))
+    parts.append(Markup(
+        '<p class="footnote">From your private <code>portfolio/international_account.csv</code>: add a '
+        '<code>deposit</code> row whenever you send money to the broker (a <code>withdrawal</code> row when you take '
+        'some out) and update the <code>cash</code> row from your broker now and then. Share values use this '
+        'dashboard\'s prices, so the account value can differ from your broker\'s by a few dollars.</p>'))
+    return ui.section(_join(parts), title="Your account — money in and how it has grown", sec_id="intl-account",
+                      icon="coins", term="account-growth",
+                      sub="Everything you've put into the account against what it's worth today.")
+
+
 def _intl_tab(rg, ips, *, history_rows, tracker, intl_history, realized=None):
     if not ips:
         return Markup(
@@ -1408,6 +1462,8 @@ def _intl_tab(rg, ips, *, history_rows, tracker, intl_history, realized=None):
     if not t.get("fx_available"):
         parts.append(ui.banner("ℹ️ USD/KES exchange rate wasn't fetched this run — figures below are USD only "
                                "(no guessed KES conversion).", tone="info"))
+    if ips.get("account"):
+        parts.append(_intl_account(ips["account"]))
     gp, dp = t.get("gain_pct"), t.get("day_change_pct")
     cost = t.get("cost_basis") or 0.0
     div_on_cost = (t["est_annual_dividend"] / cost * 100.0) if cost and t.get("est_annual_dividend") is not None else None
@@ -1418,7 +1474,9 @@ def _intl_tab(rg, ips, *, history_rows, tracker, intl_history, realized=None):
         ui.kpi("Market Value Today", f"${t['market_value']:,.0f}", big=True, private=True,
                sub=f"{kes}As of {ips.get('as_of', '')} · {t['n_available']} of {t['n_holdings']} holding(s) priced "
                    f"today · all figures in USD."),
-        ui.kpi("Total Cost Basis", f"${t['cost_basis']:,.0f}", private=True, term="cost-basis"),
+        ui.kpi("Total Cost Basis", f"${t['cost_basis']:,.0f}", private=True, term="cost-basis",
+               sub=("what today's shares cost — includes profits reinvested from sales, so it isn't the money "
+                    "you deposited" if ips.get("account") else None)),
         ui.kpi("Total Gain / Loss", f"{'-' if (t['gain'] or 0) < 0 else '+'}${abs(t['gain']):,.0f}",
                tone=tone(t["gain"]), private=True, term="gain-loss",
                delta_html=ui.delta(gp, fmt="{:+.1f}%") if gp is not None else None),
