@@ -359,6 +359,17 @@ def main():
                 intl_portfolio_summary = intl_mod.compute_international_portfolio(
                     intl_lots, intl_analysis_results, intl_fundamentals_data, intl_scores, usd_kes,
                 )
+                # The account as a whole (private portfolio/international_account.csv):
+                # money deposited, cash, and growth on the deposits — when the file exists.
+                try:
+                    import broker_account
+                    acct = broker_account.summarise(
+                        broker_account.load_account(config.portfolio_dir), intl_portfolio_summary,
+                        realized_usd=sum(s["gain"] for s in sold["intl"]))
+                    if acct:
+                        intl_portfolio_summary["account"] = acct
+                except Exception as e:
+                    logger.warning(f"International account skipped: {e}")
                 intl_portfolio_history_tracker = PortfolioHistoryTracker(
                     config.portfolio_dir, history_filename=intl_mod.HISTORY_FILE,
                 )
