@@ -208,7 +208,8 @@ def main():
         try:
             from dividend_calendar import apply_dividend_calendar
             logger.info("Validating dividends against the NSE dividend calendar...")
-            apply_dividend_calendar(fundamentals_data, cache_dir=config.cache_dir, logger=logger)
+            apply_dividend_calendar(fundamentals_data, cache_dir=config.cache_dir, logger=logger,
+                                    force_refresh=args.force_refresh, refresh_days=config.dividend_refresh_days)
         except Exception as e:
             logger.warning(f"Dividend validation skipped: {e}")
 
@@ -450,7 +451,8 @@ def main():
                         sym, result, report_type='html',
                         fundamentals=intl_fundamentals_data.get(sym, {}),
                         score=intl_scores.get(sym),
-                        dividend_history=intl_data.fetch_dividend_history(sym),
+                        dividend_history=intl_data.fetch_dividend_history(
+                            sym, cache_dir=config.cache_dir, force_refresh=args.force_refresh),
                         earnings_calendar=intl_data.fetch_earnings_calendar(sym),
                         news=[n for n in intl_portfolio_news if n['symbol'] == sym],
                         usd_kes=usd_kes,

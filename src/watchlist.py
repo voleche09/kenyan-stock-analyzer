@@ -382,7 +382,7 @@ def extract_facts(market, analysis_result, fund):
     currency = "KES" if nse else (fund.get("currency") or "USD")
     if nse:
         hi, lo = _num(fund.get("price_52w_high")), _num(fund.get("price_52w_low"))
-        ex_div = fund.get("dividend_ex_date")
+        ex_div = fund.get("dividend_next_date")
         earnings = fund.get("earnings_next_date")
     else:
         hi, lo = _num(fund.get("week52_high")), _num(fund.get("week52_low"))

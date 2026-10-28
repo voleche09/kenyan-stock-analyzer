@@ -108,7 +108,7 @@ def fetch_fundamentals(symbol, cache_dir=None, force_refresh=False):
     if cache_dir and not force_refresh:
         cached = _load_json_cache(_fund_cache_path(symbol, cache_dir))
         if cached:
-            return cached
+            return _apply_dividend_reference(symbol, cached)
     try:
         info = fetch_info(symbol)
     except Exception as e:
@@ -120,6 +120,24 @@ def fetch_fundamentals(symbol, cache_dir=None, force_refresh=False):
     fund = fundamentals_from_info(symbol, info)
     if cache_dir and fund:
         _save_json_cache(_fund_cache_path(symbol, cache_dir), fund)
+    return _apply_dividend_reference(symbol, fund)
+
+
+def _apply_dividend_reference(symbol, fund):
+    from dividend_reference import current_cycle
+    from dividend_calendar import apply_declaration
+    ref = current_cycle(symbol)
+    if ref:
+        apply_declaration(fund, {**ref, "declaration_status": ref.get("status"),
+                                "note": ref.get("note", "Issuer declaration; next payment is not projected.")})
+        fund["dividend_status"] = "company_verified" if ref.get("confidence") == "primary" else "unverified"
+        try:
+            verified = dt.date.fromisoformat(ref["verified_date"])
+        except (KeyError, ValueError, TypeError):
+            verified = dt.date.min
+        if (dt.date.today() - verified).days >= 7:
+            fund["dividend_review_required"] = True
+            fund["dividend_note"] += " Issuer snapshot needs review for new declarations; dates are not projected."
     return fund
 
 
@@ -235,20 +253,21 @@ def fundamentals_from_info(symbol, info):
         return {}
 
 
-def fetch_dividend_history(symbol, max_items=12):
-    """Return [{date, amount}], most recent last (matches yfinance's own
-    order), or [] if the ticker has no dividend history."""
-    try:
+def fetch_dividend_history(symbol, max_items=12, cache_dir="data", force_refresh=False):
+    """Yahoo dividend events (ex-dates, NOT payment dates), cached weekly."""
+    from dividend_cache import cached_public_data
+
+    def load():
         import yfinance as yf
         div = yf.Ticker(symbol).dividends
-        if div is None or div.empty:
-            return []
-        div = div.tail(max_items)
-        return [{'date': idx.strftime('%Y-%m-%d'), 'amount': round(float(v), 4)}
-                for idx, v in div.items()]
-    except Exception as e:
-        logger.debug(f"  Dividend history unavailable for {symbol}: {e}")
-        return []
+        if div is None:
+            raise ValueError("Dividend history unavailable")
+        return [{"date": idx.strftime("%Y-%m-%d"), "amount": round(float(v), 6)}
+                for idx, v in div.tail(max_items).items()]
+
+    data, _ = cached_public_data(cache_dir, f"yahoo-dividends:{symbol}:{max_items}", load,
+                                 force_refresh=force_refresh)
+    return data if isinstance(data, list) else []
 
 
 def fetch_earnings_calendar(symbol):

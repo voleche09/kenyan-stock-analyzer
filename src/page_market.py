@@ -309,7 +309,7 @@ def dividends(rg, stocks, today=None):
     c = _Cells(rg)
     cal = []
     for s in stocks:
-        ex = s.get("ex_date")
+        ex = s.get("payment_date") or s.get("ex_date") or s.get("book_closure")
         if not ex:
             continue
         try:
@@ -318,7 +318,7 @@ def dividends(rg, stocks, today=None):
             continue
         delta = (d - today).days
         cls = "cal-passed" if delta < 0 else "cal-near" if delta <= 30 else "cal-far"
-        cal.append({"s": s, "ex": ex, "cls": cls, "delta": delta})
+        cal.append({"s": s, "ex": ex, "cls": cls, "delta": delta, "date_kind": ("Payment" if s.get("payment_date") else "Ex-dividend" if s.get("ex_date") else "Book closure")})
     upcoming = sorted([r for r in cal if r["delta"] >= 0], key=lambda r: r["delta"])
     past = sorted([r for r in cal if r["delta"] < 0], key=lambda r: -r["delta"])
 
@@ -328,16 +328,17 @@ def dividends(rg, stocks, today=None):
         body = []
         for r in rows:
             s = r["s"]
-            dps, yld = s.get("dps"), s.get("dividend_yield")
+            dps, yld = s.get("dividend_amount"), s.get("dividend_yield")
             body.append([
                 ui.cell(Markup(f'{rg._ticker_logo_html(s["symbol"])}<strong>{escape(s["symbol"])}</strong>'),
                         sort=s["symbol"], cls="sym-cell"),
-                ui.cell(f"{round(dps, 2):g}" if dps else "0", sort=_num(dps)),
+                ui.cell(f"{dps:.2f}" if dps is not None else "—", sort=_num(dps)),
                 ui.cell(f"{yld:.1f}%" if yld else "—", sort=_num(yld)),
                 ui.cell(Markup(f'<span class="cal-chip {r["cls"]}">{escape(r["ex"])}</span>'), sort=r["ex"]),
+                ui.cell(r["date_kind"]),
                 ui.cell(_days_label(r["delta"]), sort=r["delta"])])
         return ui.table([ui.Col("Symbol", sort="text"), ui.Col("Div KES", sort="number", term="dividend-dates"),
-                         ui.Col("Yield", sort="number", term="dividend-yield"), ui.Col("Ex-Date", sort="text"),
+                         ui.Col("Yield", sort="number", term="dividend-yield"), ui.Col("Date", sort="text"), ui.Col("Date type", sort="text"),
                          ui.Col("When", sort="number")], body)
 
     def amount(s):
@@ -347,7 +348,7 @@ def dividends(rg, stocks, today=None):
                 return ui.cell(Markup(f'<span class="div-unverified" title="TradingView figure — not cross-checked">'
                                       f'{round(dps, 2):g}*</span>'), sort=dps)
             return ui.cell(Markup(f'<span class="div-pay">{round(dps, 2):g}</span>'), sort=dps)
-        return ui.cell(Markup('<span class="div-zero">0</span>'), sort=0)
+        return ui.cell("0" if dps == 0 else "—", sort=dps)
 
     payers = sorted([s for s in stocks if s.get("dps") and s["dps"] > 0],
                     key=lambda s: s.get("dividend_yield") or 0, reverse=True)
@@ -358,23 +359,28 @@ def dividends(rg, stocks, today=None):
         rows.append([c.symbol(s), amount(s),
                      ui.cell(f"{s['dividend_yield']:.1f}%" if s.get("dividend_yield") else "—",
                              sort=_num(s.get("dividend_yield"))),
-                     ui.cell(chip, sort=d.isoformat() if d else None)])
-    all_table = ui.table([ui.Col("Symbol", sort="text"), ui.Col("Div KES", sort="number", term="dividend-dates"),
+                     ui.cell(chip, sort=d.isoformat() if d else None),
+                     ui.cell(s.get("dividend_type") or "Not confirmed"),
+                     ui.cell(f"{s['dividend_amount']:.2f}" if s.get("dividend_amount") is not None else "—"),
+                     ui.cell(s.get("payment_date") or "Not confirmed"),
+                     ui.cell(f"{s['dividend_payout_ratio']:.1f}%" if s.get("dividend_payout_ratio") is not None else "—")])
+    all_table = ui.table([ui.Col("Symbol", sort="text"), ui.Col("Annual DPS KES", sort="number", term="dividend-dates"),
                           ui.Col("Yield", sort="number", term="dividend-yield"),
-                          ui.Col("Book closure / Ex-date", sort="text", term="dividend-dates")],
+                          ui.Col("Book closure / Ex-date", sort="text", term="dividend-dates"),
+                          ui.Col("Type"), ui.Col("Payment KES/share"), ui.Col("Payment date"), ui.Col("Payout ratio")],
                          rows, table_id="mainTable", filter_placeholder="🔍 Filter by symbol or name…")
     nxt = upcoming[0] if upcoming else None
     best = payers[0] if payers else None
     soon = sum(1 for r in upcoming if r["delta"] <= 30)
     strip = ui.kpi_row([
-        ui.kpi("Paying a dividend", f"{len(payers)} of {len(stocks)}", sub="stocks with a declared dividend",
+        ui.kpi("Paying a dividend", f"{len(payers)} of {len(stocks)}", sub="stocks with positive annual dividend data",
                term="est-dividend"),
         ui.kpi("Highest yield", f"{best['dividend_yield']:.1f}%" if best and best.get("dividend_yield") else "—",
                sub=best["symbol"] if best else None, tone="up" if best else None, term="dividend-yield"),
-        ui.kpi("Next ex-dividend date", nxt["ex"] if nxt else "—",
+        ui.kpi("Next dividend event", nxt["ex"] if nxt else "—",
                sub=f"{nxt['s']['symbol']} · {_days_label(nxt['delta'])}" if nxt else "none scheduled",
                term="ex-dividend"),
-        ui.kpi("Ex-dates in the next 30 days", f"{soon}", sub="buy before the date to qualify"),
+        ui.kpi("Dividend events in the next 30 days", f"{soon}", sub="payment, ex-dividend or book-closure dates"),
     ], cls="kpis-stats")
     yields = sc.hbars([{"label": s["symbol"], "value": s.get("dividend_yield"), "href": s.get("report_file"),
                         "sub": f"KES {round(s['dps'], 2):g}/share", "tone": "accent"}
@@ -388,17 +394,17 @@ def dividends(rg, stocks, today=None):
                '<span class="cal-chip cal-far">later (&gt;30d)</span>'
                '<span class="cal-chip cal-passed">passed</span></div>'),
         Markup('<div class="grid-2 dividend-cal"><div class="stack">'
-               + str(ui.card(cal_table(upcoming, "No upcoming ex-dividend dates."),
-                             title=Markup(f'🟢 Upcoming Ex-Dividend Dates <span class="cal-count">({len(upcoming)})</span>')))
+               + str(ui.card(cal_table(upcoming, "No upcoming dividend dates."),
+                             title=Markup(f'🟢 Upcoming Dividend Dates <span class="cal-count">({len(upcoming)})</span>')))
                + str(yields_card) + '</div>'
-               + str(ui.card(cal_table(past, "No past ex-dividend dates recorded."),
-                             title=Markup(f'🔴 Past Ex-Dividend Dates <span class="cal-count">({len(past)})</span>')))
+               + str(ui.card(cal_table(past, "No past dividend dates recorded."),
+                             title=Markup(f'🔴 Past Dividend Dates <span class="cal-count">({len(past)})</span>')))
                + '</div>'),
-        Markup('<p class="footnote">Own the shares before the book-closure/ex-date to qualify.</p>'),
+        Markup('<p class="footnote">Payment dates are not eligibility deadlines. Ex-dividend and book-closure dates are distinct; settlement rules affect eligibility.</p>'),
     ]), title="Dividend Calendar", sec_id="dividend-calendar", icon="calendar", term="dividend-dates")
     return _page(
-        'Declared dividends from the NSE calendar (mystocks). '
-        '<span class="div-unverified">amber*</span> = TradingView figure that could not be cross-checked.',
+        'Issuer declarations are preferred; other entries use the secondary NSE calendar. '
+        'Annual DPS, yield and payout ratios are separate from each payment. See stock pages for sources and approval status.',
         strip, calendar,
         ui.section(Markup('<div class="cal-legend">Book closure / ex-date: <span class="bc-future">upcoming</span>'
                           '<span class="bc-soon">within a week</span><span class="bc-passed">passed</span></div>')

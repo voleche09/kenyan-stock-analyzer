@@ -35,8 +35,8 @@ _TERMS = {
     "lookback": ("Performance over time", "How much your portfolio made or lost over the last day, week, month and "
                  "year, from the snapshots this dashboard saves each day you run it. Money you added (a purchase) or "
                  "took out (a sale) isn't counted as a gain or a loss — a sale's profit or loss is."),
-    "est-dividend": ("Estimated yearly dividend", "Your number of shares multiplied by the most recent declared "
-                     "dividend per share. Companies can change or skip dividends, so it is an estimate."),
+    "est-dividend": ("Estimated yearly dividend", "Your number of shares multiplied by the annual dividend "
+                     "per share (not a single interim or final installment). Companies can change or skip dividends, so it is an estimate."),
     "yield-on-cost": ("Dividend yield on cost", "The yearly dividend as a percentage of what you paid, rather than "
                       "of today's price."),
     # ---- bonds ----
@@ -97,8 +97,8 @@ _TERMS = {
                "pays to borrow — a benchmark for every other interest rate."),
     "cbr": ("Central Bank Rate", "The Central Bank of Kenya's policy interest rate. Banks' lending and deposit rates "
             "tend to follow it."),
-    "dividend-dates": ("Book closure & payment", "Own the shares before the book-closure date to qualify for the "
-                       "dividend; it is paid on the payment date."),
+    "dividend-dates": ("Book closure & payment", "Book closure/record date identifies registered holders. The ex-dividend date is a separate "
+                       "trading cutoff; settlement rules affect eligibility. Payment date is when cash is scheduled."),
     "earnings-date": ("Earnings date", "When the company is due to publish results. Prices often move sharply "
                       "around these dates."),
     # ---- company figures the stock pages show beyond the ones below ----

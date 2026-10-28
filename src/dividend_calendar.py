@@ -1,259 +1,201 @@
+"""Issuer-first dividends with persistent, explicitly attributed fallback data.
+
+A dividend payment is NOT annual DPS. Book closure is NOT an ex-date.
+Verified declarations are retained; the fallback calendar is checked weekly
+for new declarations or changed terms, with conflicts surfaced for review.
 """
-Dividend calendar & validation.
-
-The dividend figures TradingView reports for NSE stocks are unreliable
-(wrong amounts, currency artifacts for cross-listed names like Bank of
-Kigali). This module uses an authoritative, human-curated NSE dividend
-calendar — live.mystocks.co.ke/m/calendar — as the source of record for
-declared dividends (amount in KES, book-closure and payment dates), and
-cross-checks TradingView.
-
-Rules (never guess or invent a value):
-  - If a stock has a declared dividend on the mystocks calendar, that is the
-    value shown (with its dates), tagged source='mystocks'.
-  - TradingView is used only to cross-check; a large disagreement is flagged.
-  - If a stock is NOT on the calendar (no recent declared NSE dividend, or a
-    foreign-listed name like BKG), the dividend is reported as unavailable —
-    we show nothing rather than a questionable number.
-
-Fails safe: if the calendar is unreachable, dividend_status becomes
-'unverified' and the pipeline is unaffected.
-"""
-
-import os
+import datetime as dt
 import re
-import json
-import requests
-from datetime import datetime
 
+import dividend_reference
+from dividend_cache import cached_public_data
 from logger import get_logger
 
 logger = get_logger(__name__)
-
 CALENDAR_URL = "https://live.mystocks.co.ke/m/calendar"
 SOURCE = "mystocks.co.ke"
-
 _MONTHS = {m: i for i, m in enumerate(
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-     "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], start=1)}
+    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"], 1)}
 
 
 class DividendCalendar:
-    """Fetches and parses the authoritative NSE dividend calendar."""
-
-    def __init__(self, cache_dir="data"):
+    def __init__(self, cache_dir="data", force_refresh=False, refresh_days=7):
         self.cache_dir = cache_dir
-        os.makedirs(self.cache_dir, exist_ok=True)
-        self._data = None  # {ticker: {...}}
+        self.force_refresh = force_refresh
+        self.refresh_days = refresh_days
+        self._data = None
+        self.cache_meta = {}
 
     def fetch(self):
-        """
-        Return {ticker: {'amount', 'type', 'book_closure', 'payment_date'}}.
-        Always fetched fresh once per run; {} on failure.
-        """
         if self._data is not None:
             return self._data
-        try:
-            headers = {"User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
-            )}
+
+        def load():
             from utils import http_get
-            resp = http_get(CALENDAR_URL, headers=headers)
-            if resp is None or resp.status_code != 200:
-                logger.warning("Dividend calendar unavailable — dividends will use TradingView only")
-                self._data = {}
-                return self._data
-            self._data = self._parse(resp.text)
-            logger.info(
-                f"Dividend calendar ({SOURCE}): {len(self._data)} stocks with "
-                f"declared dividends"
-            )
-        except Exception as e:
-            logger.warning(f"Dividend calendar unavailable: {e}")
-            self._data = {}
+            response = http_get(CALENDAR_URL, headers={"User-Agent": "Mozilla/5.0"})
+            if response is None or response.status_code != 200:
+                raise ValueError("Dividend calendar unavailable")
+            rows = self._parse(response.text)
+            if not rows:
+                raise ValueError("Dividend calendar layout unrecognised")
+            return rows
+
+        data, self.cache_meta = cached_public_data(
+            self.cache_dir, CALENDAR_URL, load, refresh_days=self.refresh_days,
+            force_refresh=self.force_refresh)
+        self._data = data if isinstance(data, dict) else {}
         return self._data
 
     @staticmethod
     def _parse(html):
-        """
-        Parse the mystocks calendar. Entries read like:
-            "Jul 31 2026 TOTL TotalEnergies ...: Payment of KES 3.45 final dividend"
-            "Apr 16 2026 IMH I & M Holdings Plc: Book closure KES 2.25 ..."
-        We collect, per ticker, the declared amount and the payment/book dates.
-        """
-        text = " ".join(
-            re.sub(r"<[^>]+>", " ", html).replace("&amp;", "&").split()
-        )
-        # Each event: optional date, TICKER, company name up to ':', event verb,
-        # KES amount, dividend type.
-        pat = re.compile(
-            r"(?:([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4})\s+)?"      # opt date
-            r"\b([A-Z]{2,5})\s+"                                   # ticker
-            r"[A-Z0-9][^:]{2,70}?:\s*"                             # company:
-            r"(Payment of|Book closure|Announced a[n]?|Trading ex-dividend|Ex-dividend)"
-            r"[^0-9]{0,15}KES\s+([\d.]+)\s*"                       # KES amount
-            r"([a-z ]*dividend)?"                                  # type
-        )
-        events = {}  # ticker -> list of dicts
-        for m in pat.finditer(text):
-            mon, day, year, ticker, verb, amount, dtype = m.groups()
-            try:
-                amt = float(amount)
-            except (TypeError, ValueError):
+        # Dates are headings shared by several rows. Preserve them instead of
+        # attaching the date only to the first company under each heading.
+        from bs4 import BeautifulSoup
+        text = " ".join(BeautifulSoup(html, "html.parser").get_text(" ", strip=True).split())
+        dates = list(re.finditer(r"\b([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{4})\b", text))
+        pattern = re.compile(
+            r"\b([A-Z]{2,5})\s+[A-Z0-9][^:]{2,100}?:\s*"
+            r"(Payment of|Book closure|Announced an?|Trading ex-dividend|Ex-dividend)"
+            r"[^0-9]{0,15}KES\s+([\d.]+)\s*"
+            r"((?:(?:first|and|final|interim|special|quarterly)\s+)*dividend)")
+        events = {}
+        for match in pattern.finditer(text):
+            preceding = [d for d in dates if d.end() <= match.start()]
+            if not preceding:
                 continue
-            date_str = None
-            if mon in _MONTHS and day and year:
-                date_str = f"{year}-{_MONTHS[mon]:02d}-{int(day):02d}"
-            events.setdefault(ticker, []).append({
-                "verb": verb, "amount": amt,
-                "type": (dtype or "").strip(), "date": date_str,
-            })
-
-        out = {}
-        for ticker, evs in events.items():
-            # Group events into dividend cycles by declared amount, so the
-            # amount and its dates always belong to the same declaration.
-            cycles = {}
-            for e in evs:
-                key = round(e["amount"], 2)
-                c = cycles.setdefault(key, {
-                    "amount": key, "type": e["type"],
-                    "book_closure": None, "payment_date": None, "dates": [],
-                })
-                if e["type"] and not c["type"]:
-                    c["type"] = e["type"]
-                if e["verb"] == "Book closure" and e["date"]:
-                    c["book_closure"] = e["date"]
-                if e["verb"] == "Payment of" and e["date"]:
-                    c["payment_date"] = e["date"]
-                if e["date"]:
-                    c["dates"].append(e["date"])
-            # Choose the most recent / upcoming cycle (latest known date).
-            chosen = max(
-                cycles.values(),
-                key=lambda c: max(c["dates"]) if c["dates"] else "",
-            )
-            out[ticker] = {
-                "amount": chosen["amount"],
-                "type": chosen["type"] or "dividend",
-                "book_closure": chosen["book_closure"],
-                "payment_date": chosen["payment_date"],
-                "source": SOURCE,
-            }
-        return out
+            mon, day, year = preceding[-1].groups()
+            try:
+                date = dt.date(int(year), _MONTHS[mon], int(day)).isoformat()
+                symbol, verb, amount, kind = match.groups()
+                amount = float(amount)
+            except (KeyError, TypeError, ValueError):
+                continue
+            events.setdefault(symbol, []).append((date, verb, amount, kind))
+        result = {}
+        fields = {"Payment of": "payment_date", "Book closure": "book_closure",
+                  "Trading ex-dividend": "ex_date", "Ex-dividend": "ex_date"}
+        for symbol, rows in events.items():
+            cycles = []
+            for date, verb, amount, kind in sorted(rows):
+                field = fields.get(verb, "announcement_date")
+                # Same amount can recur in different years, or for interim and
+                # final. Never merge those into a fictitious dividend cycle.
+                candidates = [c for c in cycles if c["amount"] == amount and c["type"] == kind
+                              and not c.get(field) and 0 <= (dt.date.fromisoformat(date)
+                              - dt.date.fromisoformat(c["_first"])).days <= 180]
+                cycle = candidates[-1] if candidates else None
+                if cycle is None:
+                    cycle = {"amount": amount, "type": kind, "_first": date,
+                             "currency": "KES", "source": SOURCE, "source_url": CALENDAR_URL}
+                    cycles.append(cycle)
+                cycle[field] = date
+            upcoming = [c for c in cycles if c.get("payment_date", "") >= dt.date.today().isoformat()]
+            chosen = (min(upcoming, key=lambda c: c["payment_date"]) if upcoming
+                      else max(cycles, key=lambda c: c.get("payment_date") or c["_first"]))
+            result[symbol] = {k: v for k, v in chosen.items() if not k.startswith("_")}
+        return result
 
     def validate(self, symbol, tv_dps, tolerance_pct=15.0):
-        """
-        Cross-check TradingView's DPS against the authoritative calendar.
-
-        Returns dict:
-            amount, type, book_closure, payment_date, source, status, note
-        status: 'verified'  (on calendar; TradingView agrees or absent)
-                'mismatch'   (on calendar; TradingView differs materially)
-                'unavailable'(not on the NSE calendar → no number shown)
-        """
-        cal = self.fetch()
-        row = cal.get(symbol.upper()) if cal else None
-
+        ref = dividend_reference.current_cycle(symbol)
+        if ref:
+            result = {**ref, "declaration_status": ref.get("status", "declared"),
+                      "status": "company-verified" if ref.get("confidence") == "primary" else "secondary",
+                      "note": f"Source: {ref['source']}. " + ref.get("note", "")}
+            if ref.get("confidence") == "secondary":
+                result["note"] += " The company's own circular wasn't read directly."
+            try:
+                age = (dt.date.today() - dt.date.fromisoformat(ref["verified_date"])).days
+            except (KeyError, TypeError, ValueError):
+                age = 0
+            # Reuse persisted issuer updates even when the bundled seed is
+            # recent. The seed starts the cache without another network pull.
+            if symbol.upper() == "KCB":
+                from dividend_sources import refresh_kcb
+                cycles, meta = refresh_kcb(self.cache_dir, force_refresh=self.force_refresh,
+                                           refresh_days=self.refresh_days, seed=ref)
+                if cycles:
+                    today = dt.date.today().isoformat()
+                    upcoming = [c for c in cycles if c["payment_date"] >= today]
+                    chosen = (min(upcoming, key=lambda c: c["payment_date"]) if upcoming
+                              else max(cycles, key=lambda c: c["payment_date"]))
+                    return {**chosen, "status": "company-verified", "declaration_status": "declared",
+                            "verified_date": meta.get("checked"), "stale": meta.get("stale", False),
+                            "note": "Issuer dividend register; final and special payments on the same date are combined."}
+            if age >= self.refresh_days or self.force_refresh:
+                # An old issuer reference must not hide a newer announcement.
+                row = self.fetch().get(symbol.upper())
+                result["stale"] = self.cache_meta.get("stale", False)
+                result["checked_date"] = self.cache_meta.get("checked")
+                result["review_required"] = True
+                result["note"] += " Issuer snapshot needs review for newer announcements."
+                if row and row.get("payment_date") and ref.get("payment_date"):
+                    if row["payment_date"] > ref["payment_date"]:
+                        return {**row, "status": "secondary", "review_required": True,
+                                "note": "Newer calendar entry; issuer confirmation pending.",
+                                "checked_date": self.cache_meta.get("checked"),
+                                "stale": self.cache_meta.get("stale", False)}
+                    if row["payment_date"] == ref["payment_date"] and row["amount"] != ref["amount"]:
+                        result["note"] += " Calendar conflicts with issuer amount; retaining issuer terms."
+            return result
+        row = self.fetch().get(symbol.upper())
         if not row:
-            return {
-                "amount": None, "type": None, "book_closure": None,
-                "payment_date": None, "source": None,
-                "status": "unavailable",
-                "note": "No declared dividend on the NSE calendar",
-            }
-
-        status, note = "verified", f"Declared dividend per {SOURCE}"
-        if tv_dps and row["amount"] and row["amount"] > 0:
-            diff = abs(tv_dps - row["amount"]) / row["amount"] * 100
-            if diff > tolerance_pct:
-                status = "mismatch"
-                note = (f"TradingView DPS {tv_dps:g} differs from the declared "
-                        f"KES {row['amount']:g} — showing the declared value")
-        return {**row, "status": status, "note": note}
+            return {"amount": None, "status": "unavailable",
+                    "note": "No confirmed declaration available; this does not establish that the company pays no dividend."}
+        # TradingView DPS is annual, and is not comparable to one installment.
+        return {**row, "status": "secondary", "note": "Calendar entry; not issuer-verified.",
+                "checked_date": self.cache_meta.get("checked"),
+                "stale": self.cache_meta.get("stale", False)}
 
 
-def apply_dividend_calendar(fundamentals_data, cache_dir="data", logger=None):
-    """
-    Replace TradingView dividend figures with the authoritative NSE calendar
-    values (cross-checked). Mutates fundamentals_data in place.
+def apply_declaration(fund, result):
+    """Apply event fields without corrupting annual analytics or currency units."""
+    today = dt.date.today().isoformat()
+    fields = {"amount": "amount", "type": "type", "currency": "currency",
+              "book_closure": "book_closure", "record_date": "record_date",
+              "payment_date": "payment_date", "source": "source", "source_url": "source_url",
+              "verified_date": "verified_date", "checked_date": "checked_date",
+              "note": "note", "declaration_status": "declaration_status",
+              "review_required": "review_required", "stale": "cache_stale"}
+    for key, dest in fields.items():
+        fund["dividend_" + dest] = result.get(key)
+    payment = result.get("payment_date")
+    fund["dividend_payment_upcoming"] = bool(payment and payment >= today)
+    fund["dividend_ex_date"] = result.get("ex_date")
+    fund["dividend_ex_date_is_upcoming"] = bool(result.get("ex_date") and result["ex_date"] >= today)
+    book_closure = result.get("book_closure")
+    fund["dividend_book_closure_upcoming"] = bool(book_closure and book_closure >= today)
+    # The actionable NSE date for "needs your attention" style alerts: a true
+    # ex-dividend date when one is known, else the book closure (most issuer
+    # declarations and the mystocks calendar give book closure, not ex-date).
+    fund["dividend_next_date"] = result.get("ex_date") or book_closure
+    fund["dividend_next_date_upcoming"] = (
+        fund["dividend_ex_date_is_upcoming"] if result.get("ex_date") else fund["dividend_book_closure_upcoming"]
+    )
+    # Only an explicitly sourced annual total can replace annual DPS. Never
+    # derive a payout ratio by mixing one installment with a year's earnings.
+    if result.get("annual_dps") is not None and result.get("currency", "KES") == "KES":
+        fund["dps_fy"] = result["annual_dps"]
+        close = fund.get("close")
+        fund["dividend_yield"] = round(result["annual_dps"] / close * 100, 2) if close and close > 0 else None
+        fund["dividend_yield_basis"] = result.get("annual_period", "Issuer annual total")
+    else:
+        fund["dividend_yield_basis"] = "Annual figure from market-data provider; not this installment"
 
-    For each stock:
-      - verified/mismatch: dps_fy, dividend_ex_date (book closure) and
-        dividend_yield are set from the declared dividend (yield recomputed
-        from the declared amount so the figures are consistent and backed).
-      - unavailable: dividend fields are cleared to None (shown as "n/a"),
-        never a guessed number.
-    Adds dividend_status / dividend_note / dividend_payment_date / _source.
 
-    Returns (verified, mismatch, unavailable) counts. Fails safe.
-    """
-    counts = {"verified": 0, "corrected": 0, "unverified": 0, "none": 0}
-    try:
-        dc = DividendCalendar(cache_dir=cache_dir)
-        dc.fetch()
-    except Exception as e:
-        if logger:
-            logger.warning(f"Dividend validation skipped: {e}")
-        return counts
-
-    for sym, f in (fundamentals_data or {}).items():
-        if not f:
+def apply_dividend_calendar(fundamentals_data, cache_dir="data", logger=None,
+                            force_refresh=False, refresh_days=7):
+    counts = {"company_verified": 0, "verified": 0, "corrected": 0, "unverified": 0, "none": 0}
+    dc = DividendCalendar(cache_dir, force_refresh, refresh_days)
+    for symbol, fund in (fundamentals_data or {}).items():
+        if not fund:
             continue
-        tv_dps = f.get("dps_fy")  # TradingView's figure (used as fallback)
-        res = dc.validate(sym, tv_dps)
-        f["dividend_type"] = res.get("type")
-        f["dividend_book_closure"] = res.get("book_closure")
-        f["dividend_payment_date"] = res.get("payment_date")
-
-        if res["status"] in ("verified", "mismatch") and res["amount"]:
-            # Cross-checked against the NSE calendar → use the declared value.
-            f["dps_fy"] = res["amount"]
-            f["dividend_ex_date"] = res.get("book_closure") or None
-            f["dividend_ex_date_is_upcoming"] = None  # book closure, not TV ex-date
-            close = f.get("close")
-            f["dividend_yield"] = (
-                round(res["amount"] / close * 100, 2) if close else None
-            )
-            f["dividend_source"] = res["source"]
-            f["dividend_note"] = res["note"]
-            status = "corrected" if res["status"] == "mismatch" else "verified"
-        elif tv_dps and tv_dps > 0:
-            # Not on the calendar → fall back to TradingView, clearly flagged
-            # as unverified (keep TradingView's dps / yield / ex-date as-is).
-            f["dividend_source"] = "TradingView (unverified)"
-            f["dividend_note"] = ("From TradingView — could not be cross-checked "
-                                  "on the NSE dividend calendar; treat with caution")
-            status = "unverified"
-        else:
-            # No dividend on record from any source.
-            f["dps_fy"] = 0
-            f["dividend_yield"] = None
-            f["dividend_ex_date"] = None
-            f["dividend_source"] = None
-            f["dividend_note"] = "No dividend on record"
-            status = "none"
-
-        f["dividend_status"] = status
-        counts[status] += 1
-
-    if logger:
-        logger.info(
-            f"  Dividends: {counts['verified']} verified, "
-            f"{counts['corrected']} corrected (calendar vs TradingView), "
-            f"{counts['unverified']} TradingView-only (uncross-checked), "
-            f"{counts['none']} none"
-        )
+        try:
+            result = dc.validate(symbol, fund.get("dps_fy"))
+            apply_declaration(fund, result)
+            status = {"company-verified": "company_verified", "secondary": "verified"}.get(result["status"], "unverified")
+            fund["dividend_status"] = status
+            counts[status] += 1
+        except Exception:
+            if logger:
+                logger.warning("Dividend enrichment unavailable; preserving market-data fields")
     return counts
-
-
-# ---- Test ----
-if __name__ == "__main__":
-    from logger import setup_logging
-    setup_logging()
-    dc = DividendCalendar()
-    cal = dc.fetch()
-    print(f"\n{len(cal)} stocks on the calendar")
-    for s in ["IMH", "BKG", "SCOM", "KCB", "EQTY", "BAT", "SCBK"]:
-        print(f"  {s}: {dc.validate(s, {'IMH': 3.75, 'BKG': 4.71}.get(s))}")

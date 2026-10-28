@@ -752,11 +752,14 @@ class ReportGenerator:
                 movers_rows += (f'<tr><td>{label}</td><td><b>{sym}</b></td>'
                                 f'<td style="color:{col};">{chg:+.2f}%</td></tr>')
 
-        # ---- Upcoming ex-dividends (next 30 days) ----
+        # ---- Upcoming dividend dates (next 30 days) ----
+        # dividend_next_date: the true ex-dividend date when known, else the
+        # book closure (most issuer declarations and the mystocks calendar
+        # give book closure, not a separate ex-date).
         today = datetime.now().date()
         upcoming = []
         for sym, f in fundamentals_data.items():
-            ex = f.get('dividend_ex_date')
+            ex = f.get('dividend_next_date')
             if not ex:
                 continue
             try:
@@ -764,8 +767,10 @@ class ReportGenerator:
             except (ValueError, TypeError):
                 continue
             delta = (d - today).days
+            amount = f.get('dividend_amount')
             if 0 <= delta <= 30:
-                upcoming.append((delta, sym, ex, f.get('dps_fy'), f.get('dividend_yield')))
+                upcoming.append((delta, sym, ex, amount if amount is not None else f.get('dps_fy'),
+                                 f.get('dividend_yield')))
         upcoming.sort()
         exdiv_rows = ''
         for delta, sym, ex, dps, dy in upcoming:
@@ -964,7 +969,11 @@ ul {{ margin: 4px 0; padding-left: 18px; }} li {{ margin: 2px 0; }}
                 # Dividend yield (key for income-focused NSE investors)
                 'dividend_yield': fund.get('dividend_yield'),
                 # Dividend amount (KES/share) and ex-dividend date
-                'dps': fund.get('dps_fy'),
+                'dps': fund.get('dps_fy'),  # annual analytics, never one installment
+                'dividend_amount': fund.get('dividend_amount'),
+                'dividend_payout_ratio': fund.get('dividend_payout_ratio'),
+                'dividend_source': fund.get('dividend_source'),
+                'dividend_declaration_status': fund.get('dividend_declaration_status'),
                 'ex_date': fund.get('dividend_ex_date'),
                 'ex_upcoming': fund.get('dividend_ex_date_is_upcoming'),
                 'dividend_status': fund.get('dividend_status'),
